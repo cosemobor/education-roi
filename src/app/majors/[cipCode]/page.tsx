@@ -1,0 +1,106 @@
+import { getDb } from '@/lib/db';
+import { programs, schools, majorsSummary } from '@/lib/db/schema';
+import { eq, desc } from 'drizzle-orm';
+import type { MajorSummary, ProgramRecord } from '@/types';
+import MajorDetail from '@/components/MajorDetail';
+
+export const dynamic = 'force-dynamic';
+
+interface PageProps {
+  params: Promise<{ cipCode: string }>;
+}
+
+export default async function MajorPage({ params }: PageProps) {
+  const { cipCode } = await params;
+  const db = getDb();
+
+  // Fetch major summary
+  const [majorRow] = await db
+    .select()
+    .from(majorsSummary)
+    .where(eq(majorsSummary.cipCode, cipCode))
+    .limit(1);
+
+  if (!majorRow) {
+    return (
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:py-12">
+        <p className="text-text-secondary">Major not found.</p>
+        <a href="/" className="mt-2 inline-block text-sm text-accent hover:underline">
+          &larr; Back to all majors
+        </a>
+      </main>
+    );
+  }
+
+  const major: MajorSummary = {
+    cipCode: majorRow.cipCode,
+    cipTitle: majorRow.cipTitle,
+    schoolCount: majorRow.schoolCount ?? 0,
+    medianEarn1yr: majorRow.medianEarn1yr,
+    medianEarn4yr: majorRow.medianEarn4yr,
+    medianEarn5yr: majorRow.medianEarn5yr,
+    p25Earn1yr: majorRow.p25Earn1yr,
+    p75Earn1yr: majorRow.p75Earn1yr,
+    p25Earn5yr: majorRow.p25Earn5yr,
+    p75Earn5yr: majorRow.p75Earn5yr,
+    growthRate: majorRow.growthRate,
+  };
+
+  // Fetch all programs for this major with school data
+  const rows = await db
+    .select({
+      unitId: programs.unitId,
+      schoolName: programs.schoolName,
+      state: programs.state,
+      cipCode: programs.cipCode,
+      cipTitle: programs.cipTitle,
+      credLevel: programs.credLevel,
+      credTitle: programs.credTitle,
+      earn1yr: programs.earn1yr,
+      earn4yr: programs.earn4yr,
+      earn5yr: programs.earn5yr,
+      earn1yrCount: programs.earn1yrCount,
+      costAttendance: programs.costAttendance,
+      selectivityTier: programs.selectivityTier,
+      ownership: schools.ownership,
+      ownershipLabel: schools.ownershipLabel,
+      admissionRate: schools.admissionRate,
+      satMath75: schools.satMath75,
+      satRead75: schools.satRead75,
+      size: schools.size,
+      completionRate: schools.completionRate,
+    })
+    .from(programs)
+    .leftJoin(schools, eq(programs.unitId, schools.unitId))
+    .where(eq(programs.cipCode, cipCode))
+    .orderBy(desc(programs.earn1yr));
+
+  const programData: ProgramRecord[] = rows.map((r) => ({
+    unitId: r.unitId,
+    schoolName: r.schoolName ?? '',
+    state: r.state ?? '',
+    cipCode: r.cipCode,
+    cipTitle: r.cipTitle ?? '',
+    credLevel: r.credLevel ?? 0,
+    credTitle: r.credTitle ?? '',
+    earn1yr: r.earn1yr,
+    earn4yr: r.earn4yr,
+    earn5yr: r.earn5yr,
+    earn1yrCount: r.earn1yrCount,
+    costAttendance: r.costAttendance,
+    selectivityTier: r.selectivityTier ?? '',
+    ownership: r.ownership,
+    ownershipLabel: r.ownershipLabel,
+    admissionRate: r.admissionRate,
+    satMath75: r.satMath75,
+    satRead75: r.satRead75,
+    size: r.size,
+    completionRate: r.completionRate,
+  }));
+
+  return (
+    <main className="mx-auto max-w-7xl px-4 py-8 sm:py-12">
+      <MajorDetail major={major} programs={programData} />
+    </main>
+  );
+}
