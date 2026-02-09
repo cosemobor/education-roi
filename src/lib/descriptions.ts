@@ -5,7 +5,7 @@ export function generateMajorDescription(major: MajorSummary): string {
   const parts: string[] = [];
 
   parts.push(
-    `${major.cipTitle} is offered at ${formatNumber(major.schoolCount)} school${major.schoolCount === 1 ? '' : 's'}.`,
+    `${major.cipTitle.replace(/\.+$/, '')} is offered at ${formatNumber(major.schoolCount)} school${major.schoolCount === 1 ? '' : 's'}.`,
   );
 
   if (major.medianEarn1yr != null) {
@@ -81,7 +81,7 @@ export function generateSchoolDescription(
   }
 
   parts.push(
-    'Earnings are weighted by the number of graduates reporting in each program to reflect the typical student outcome. ROI represents first-year earnings relative to cost of attendance.',
+    'Earnings are weighted by the number of graduates reporting in each program to reflect the typical student outcome. Payback period estimates how many years of earnings it takes to recoup total degree cost using net price after financial aid.',
   );
 
   return parts.join(' ');

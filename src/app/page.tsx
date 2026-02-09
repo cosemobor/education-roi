@@ -17,7 +17,7 @@ export default async function Home() {
 
   const majorsData: MajorSummary[] = majorsRows.map((r) => ({
     cipCode: r.cipCode,
-    cipTitle: r.cipTitle,
+    cipTitle: r.cipTitle.replace(/\.+$/, ''),
     schoolCount: r.schoolCount ?? 0,
     medianEarn1yr: r.medianEarn1yr,
     medianEarn4yr: r.medianEarn4yr,
@@ -76,7 +76,7 @@ export default async function Home() {
   const earn5yrBySchool = new Map<number, { earn: number; count: number }[]>();
   for (const row of programRows) {
     if (!topProgramMap.has(row.unitId) && row.earn1yr != null) {
-      topProgramMap.set(row.unitId, row.cipTitle ?? '');
+      topProgramMap.set(row.unitId, (row.cipTitle ?? '').replace(/\.+$/, ''));
     }
     if (row.earn1yr != null) {
       const arr = earn1yrBySchool.get(row.unitId) ?? [];

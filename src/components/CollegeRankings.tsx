@@ -69,6 +69,7 @@ export default function CollegeRankings({
   const [stateFilter, setStateFilter] = useState('');
   const [minPrograms, setMinPrograms] = useState(5);
   const [page, setPage] = useState(1);
+  const [compareSet, setCompareSet] = useState<Set<number>>(new Set());
 
   const states = useMemo(() => {
     const s = new Set(schoolRankings.map((r) => r.state).filter(Boolean));
@@ -166,6 +167,24 @@ export default function CollegeRankings({
       : null;
     return { total: filtered.length, highest, fastestPayback };
   }, [filtered]);
+
+  // Comparison
+  const comparedSchools = useMemo(() => {
+    if (compareSet.size === 0) return [];
+    return filtered.filter((r) => compareSet.has(r.unitId));
+  }, [filtered, compareSet]);
+
+  const handleCompareToggle = useCallback((unitId: number) => {
+    setCompareSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(unitId)) {
+        next.delete(unitId);
+      } else if (next.size < 4) {
+        next.add(unitId);
+      }
+      return next;
+    });
+  }, []);
 
   // Scatter chart data
   const { tierData, xDomain, yDomain } = useMemo(() => {
@@ -278,6 +297,86 @@ export default function CollegeRankings({
           </ScatterChart>
         </ResponsiveContainer>
       </div>
+
+      {/* Comparison panel */}
+      {comparedSchools.length >= 2 && (
+        <div className="mb-6 rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-text-primary">
+              Comparing {comparedSchools.length} Schools
+            </h3>
+            <button
+              onClick={() => setCompareSet(new Set())}
+              className="text-xs text-accent hover:underline"
+            >
+              Clear comparison
+            </button>
+          </div>
+          <div
+            className={`grid gap-4 ${
+              comparedSchools.length === 2
+                ? 'grid-cols-1 sm:grid-cols-2'
+                : comparedSchools.length === 3
+                  ? 'grid-cols-1 sm:grid-cols-3'
+                  : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4'
+            }`}
+          >
+            {comparedSchools.map((r) => {
+              const tier = getDisplayTier(r.name, r.selectivityTier);
+              return (
+                <div key={r.unitId} className="rounded-lg border border-gray-100 p-3">
+                  <div className="mb-2 flex items-center gap-1.5">
+                    <span
+                      className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                      style={{ backgroundColor: TIER_COLORS[tier] ?? '#9ca3af' }}
+                    />
+                    <Link
+                      href={`/schools/${r.unitId}?from=colleges`}
+                      className="truncate text-sm font-semibold text-accent hover:underline"
+                    >
+                      {r.name}
+                    </Link>
+                  </div>
+                  <p className="mb-2 text-xs text-text-secondary">{r.state} &middot; {tier}</p>
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-text-secondary">Avg 5yr</span>
+                      <span className="font-medium text-earn-above">{formatCurrency(r.weightedEarn5yr)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-secondary">Avg 1yr</span>
+                      <span className="font-medium text-earn-above">{formatCurrency(r.weightedEarn1yr)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-secondary">Payback</span>
+                      <span className="font-semibold">{formatPayback(r.paybackYears)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-secondary">Cost</span>
+                      <span className="font-medium">{formatCurrency(r.costAttendance)}</span>
+                    </div>
+                    <hr className="border-gray-100" />
+                    <div className="flex justify-between">
+                      <span className="text-text-secondary">Admit Rate</span>
+                      <span>{formatRate(r.admissionRate)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-secondary">Programs</span>
+                      <span>{formatNumber(r.programCount)}</span>
+                    </div>
+                    {r.topProgram && (
+                      <div className="flex justify-between gap-2">
+                        <span className="text-text-secondary">Top Program</span>
+                        <span className="truncate text-right">{r.topProgram}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="mb-3 flex flex-wrap items-end gap-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
@@ -396,6 +495,11 @@ export default function CollegeRankings({
       {/* Count */}
       <p className="mb-2 text-xs text-text-secondary">
         {filtered.length} of {schoolRankings.length} colleges
+        {compareSet.size > 0 && (
+          <span className="ml-2 rounded-full bg-accent/10 px-2 py-0.5 text-accent">
+            {compareSet.size}/4 selected
+          </span>
+        )}
       </p>
 
       {/* Table */}
@@ -403,6 +507,7 @@ export default function CollegeRankings({
         <table className="w-full text-left">
           <thead className="border-b border-gray-100 bg-gray-50/50">
             <tr>
+              <th className="w-10 px-2 py-2" />
               <th className="px-3 py-2 text-xs font-medium text-text-secondary">
                 #
               </th>
@@ -462,6 +567,18 @@ export default function CollegeRankings({
                   key={r.unitId}
                   className="border-b border-gray-50 transition-colors hover:bg-gray-50"
                 >
+                  <td
+                    className="w-10 px-2 py-2"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={compareSet.has(r.unitId)}
+                      onChange={() => handleCompareToggle(r.unitId)}
+                      disabled={!compareSet.has(r.unitId) && compareSet.size >= 4}
+                      className="h-3.5 w-3.5 rounded border-gray-300 text-accent accent-accent"
+                    />
+                  </td>
                   <td className="px-3 py-2.5 text-xs text-text-secondary">
                     {rank}
                   </td>
@@ -511,7 +628,7 @@ export default function CollegeRankings({
             {paginated.length === 0 && (
               <tr>
                 <td
-                  colSpan={9}
+                  colSpan={10}
                   className="px-3 py-8 text-center text-sm text-text-secondary"
                 >
                   No colleges match your filters

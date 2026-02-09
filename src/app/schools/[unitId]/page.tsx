@@ -31,7 +31,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   return {
     title: row.name,
     description,
-    openGraph: { title: `${row.name} - Education ROI`, description },
+    openGraph: { title: `${row.name} - HEO`, description },
   };
 }
 
@@ -119,7 +119,7 @@ export default async function SchoolPage({ params, searchParams }: PageProps) {
     schoolName: r.schoolName ?? '',
     state: r.state ?? '',
     cipCode: r.cipCode,
-    cipTitle: r.cipTitle ?? '',
+    cipTitle: (r.cipTitle ?? '').replace(/\.+$/, ''),
     credLevel: r.credLevel ?? 0,
     credTitle: r.credTitle ?? '',
     earn1yr: r.earn1yr,

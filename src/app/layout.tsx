@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
+import PageTracker from "@/components/PageTracker";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,9 +15,30 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Education ROI - College Major Earnings Explorer",
+  title: {
+    default: 'Higher Education Outcomes - College Earnings Explorer',
+    template: '%s | HEO',
+  },
   description:
-    "Explore earnings outcomes by college major and school using College Scorecard data.",
+    'Explore earnings outcomes by college major and school using College Scorecard data. Compare outcomes across 4,000+ programs.',
+  openGraph: {
+    title: 'Higher Education Outcomes - College Earnings Explorer',
+    description:
+      'Explore earnings outcomes by college major and school using College Scorecard data.',
+    type: 'website',
+    locale: 'en_US',
+    siteName: 'Higher Education Outcomes',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Higher Education Outcomes - College Earnings Explorer',
+    description:
+      'Explore earnings outcomes by college major and school using College Scorecard data.',
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
 };
 
 export default function RootLayout({
@@ -28,6 +51,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <Suspense fallback={null}>
+          <PageTracker />
+        </Suspense>
         {children}
       </body>
     </html>

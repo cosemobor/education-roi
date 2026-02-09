@@ -3,7 +3,16 @@
 import { useState, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import type { School, ProgramRecord, SortDir } from '@/types';
-import { formatCurrency, formatRate, formatNumber } from '@/lib/formatters';
+import { formatCurrency, formatRate, formatNumber, formatCompact } from '@/lib/formatters';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip as RechartsTooltip,
+  ResponsiveContainer,
+  Legend,
+} from 'recharts';
 import { getDisplayTier, TIER_COLORS } from '@/lib/tiers';
 import { generateSchoolDescription } from '@/lib/descriptions';
 import StatCard from './StatCard';
@@ -15,6 +24,7 @@ const PAGE_SIZE = 25;
 interface SchoolDetailProps {
   school: School;
   programs: ProgramRecord[];
+  fromTab?: string;
 }
 
 interface ProgramRow {
@@ -30,12 +40,13 @@ interface ProgramRow {
   earn1yrCount: number | null;
 }
 
-export default function SchoolDetail({ school, programs }: SchoolDetailProps) {
+export default function SchoolDetail({ school, programs, fromTab }: SchoolDetailProps) {
   const [sortField, setSortField] = useState<SortField>('earn1yr');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [credFilter, setCredFilter] = useState('');
   const [page, setPage] = useState(1);
+  const [earningsView, setEarningsView] = useState<'earn1yr' | 'earn5yr' | 'overlay'>('earn1yr');
 
   const tier = getDisplayTier(school.name, school.selectivityTier);
   const satCombined =
@@ -115,16 +126,14 @@ export default function SchoolDetail({ school, programs }: SchoolDetailProps) {
   );
 
   const handleSort = useCallback((field: SortField) => {
-    setSortField((prev) => {
-      if (prev === field) {
-        setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-        return prev;
-      }
+    if (field === sortField) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
       setSortDir(field === 'cipTitle' || field === 'credTitle' ? 'asc' : 'desc');
-      return field;
-    });
+    }
     setPage(1);
-  }, []);
+  }, [sortField]);
 
   const sortArrow = (field: SortField) => {
     if (sortField !== field) return ' \u21D5';
@@ -149,11 +158,31 @@ export default function SchoolDetail({ school, programs }: SchoolDetailProps) {
 
   const filtersActive = !!(searchQuery || credFilter);
 
+  // Bar chart data — sorted by active earnings, top 20
+  const chartData = useMemo(() => {
+    const sortKey = earningsView === 'earn5yr' ? 'earn5yr' : 'earn1yr';
+    return [...filtered]
+      .filter((r) => r[sortKey] != null)
+      .sort((a, b) => (b[sortKey] ?? 0) - (a[sortKey] ?? 0))
+      .slice(0, 20)
+      .map((r) => {
+        const title = r.cipTitle.replace(/\.+$/, '');
+        return {
+        name: title.length > 30 ? title.slice(0, 28) + '...' : title,
+        fullName: title,
+        earn1yr: r.earn1yr ?? 0,
+        earn5yr: r.earn5yr ?? 0,
+      };
+      });
+  }, [filtered, earningsView]);
+
+  const chartHeight = Math.max(200, chartData.length * 30 + 60);
+
   return (
     <div>
       {/* Back link + title */}
       <Link
-        href="/"
+        href={`/?tab=${fromTab || 'colleges'}`}
         className="mb-4 inline-block text-sm text-accent hover:underline"
       >
         &larr; Back
@@ -209,6 +238,110 @@ export default function SchoolDetail({ school, programs }: SchoolDetailProps) {
           value={formatNumber(programs.length)}
         />
       </div>
+
+      {/* Earnings bar chart */}
+      {chartData.length > 0 && (
+        <div className="mt-6 rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-text-primary">
+              Earnings by Program
+            </h3>
+            <div className="flex rounded-lg border border-gray-200 text-xs">
+              <button
+                onClick={() => setEarningsView('earn1yr')}
+                className={`px-2.5 py-1.5 transition-colors rounded-l-lg ${
+                  earningsView === 'earn1yr'
+                    ? 'bg-accent text-white'
+                    : 'text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                1-Year
+              </button>
+              <button
+                onClick={() => setEarningsView('earn5yr')}
+                className={`px-2.5 py-1.5 transition-colors ${
+                  earningsView === 'earn5yr'
+                    ? 'bg-accent text-white'
+                    : 'text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                5-Year
+              </button>
+              <button
+                onClick={() => setEarningsView('overlay')}
+                className={`px-2.5 py-1.5 transition-colors rounded-r-lg ${
+                  earningsView === 'overlay'
+                    ? 'bg-accent text-white'
+                    : 'text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                Overlay
+              </button>
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={chartHeight}>
+            <BarChart
+              data={chartData}
+              layout="vertical"
+              margin={{ top: 0, right: 20, bottom: 0, left: 10 }}
+            >
+              <XAxis
+                type="number"
+                tickFormatter={(v: number) => formatCompact(v)}
+                tick={{ fontSize: 11, fill: '#6b7280' }}
+              />
+              <YAxis
+                type="category"
+                dataKey="name"
+                width={160}
+                tick={{ fontSize: 11, fill: '#374151' }}
+              />
+              <RechartsTooltip
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                formatter={(value: any, name: any) => [
+                  formatCurrency(value ?? null),
+                  name === 'earn1yr' ? '1-Year' : '5-Year',
+                ]}
+                labelFormatter={(label) => {
+                  const item = chartData.find((d) => d.name === label);
+                  return item?.fullName ?? String(label);
+                }}
+              />
+              {earningsView === 'overlay' && (
+                <Legend
+                  wrapperStyle={{ fontSize: 11 }}
+                  iconType="square"
+                  iconSize={10}
+                  formatter={(value: any) => <span style={{ color: '#1f2937' }}>{value}</span>}
+                />
+              )}
+              {(earningsView === 'earn1yr' || earningsView === 'overlay') && (
+                <Bar
+                  dataKey="earn1yr"
+                  name="1-Year"
+                  fill="#1e3a5f"
+                  radius={[0, 4, 4, 0]}
+                  barSize={earningsView === 'overlay' ? 12 : 18}
+                />
+              )}
+              {(earningsView === 'earn5yr' || earningsView === 'overlay') && (
+                <Bar
+                  dataKey="earn5yr"
+                  name="5-Year"
+                  fill={earningsView === 'overlay' ? '#8f9db0' : '#1e3a5f'}
+                  radius={[0, 4, 4, 0]}
+                  barSize={earningsView === 'overlay' ? 12 : 18}
+                />
+              )}
+            </BarChart>
+          </ResponsiveContainer>
+          {filtered.length > 20 && (
+            <p className="mt-2 text-xs text-text-secondary">
+              Showing top 20 of {filtered.length} programs
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="mt-6 flex flex-wrap items-end gap-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
@@ -333,7 +466,7 @@ export default function SchoolDetail({ school, programs }: SchoolDetailProps) {
                     href={`/majors/${encodeURIComponent(r.cipCode)}`}
                     className="font-medium text-accent hover:underline"
                   >
-                    {r.cipTitle}
+                    {r.cipTitle.replace(/\.+$/, '')}
                   </Link>
                   <span className="ml-1.5 text-text-secondary sm:hidden">
                     {r.credTitle}

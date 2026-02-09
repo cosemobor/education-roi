@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useCallback } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   ScatterChart, Scatter, XAxis, YAxis, Tooltip,
@@ -63,6 +64,7 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
   const [categoryFilter, setCategoryFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
+  const [compareSet, setCompareSet] = useState<Set<string>>(new Set());
 
   const handleSort = useCallback((key: SortKey) => {
     if (key === sortKey) {
@@ -140,6 +142,24 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
     return { total: filtered.length, highest, fastestGrowth };
   }, [filtered]);
 
+  // Comparison
+  const comparedMajors = useMemo(() => {
+    if (compareSet.size === 0) return [];
+    return filtered.filter((m) => compareSet.has(m.cipCode));
+  }, [filtered, compareSet]);
+
+  const handleCompareToggle = useCallback((cipCode: string) => {
+    setCompareSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(cipCode)) {
+        next.delete(cipCode);
+      } else if (next.size < 4) {
+        next.add(cipCode);
+      }
+      return next;
+    });
+  }, []);
+
   // Scatter chart data: 5yr Median Earnings vs Earnings Spread, grouped by category
   const { categoryData, xDomain, yDomain } = useMemo(() => {
     const groups: Record<string, MajorScatterDatum[]> = {};
@@ -180,6 +200,7 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
   const handleDotClick = useCallback((data: any) => {
     const code = data?.cipCode ?? data?.payload?.cipCode;
     if (code != null) {
+      trackEvent('major_click', { cipCode: code });
       router.push(`/majors/${encodeURIComponent(code)}?from=majors`);
     }
   }, [router]);
@@ -293,6 +314,82 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
         </div>
       )}
 
+      {/* Comparison panel */}
+      {comparedMajors.length >= 2 && (
+        <div className="mb-6 rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-text-primary">
+              Comparing {comparedMajors.length} Majors
+            </h3>
+            <button
+              onClick={() => setCompareSet(new Set())}
+              className="text-xs text-accent hover:underline"
+            >
+              Clear comparison
+            </button>
+          </div>
+          <div
+            className={`grid gap-4 ${
+              comparedMajors.length === 2
+                ? 'grid-cols-1 sm:grid-cols-2'
+                : comparedMajors.length === 3
+                  ? 'grid-cols-1 sm:grid-cols-3'
+                  : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4'
+            }`}
+          >
+            {comparedMajors.map((m) => {
+              const category = getCipCategory(m.cipCode);
+              return (
+                <div key={m.cipCode} className="rounded-lg border border-gray-100 p-3">
+                  <div className="mb-2 flex items-center gap-1.5">
+                    <span
+                      className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                      style={{ backgroundColor: CIP_CATEGORY_COLORS[category] ?? '#6b7280' }}
+                    />
+                    <Link
+                      href={`/majors/${encodeURIComponent(m.cipCode)}?from=majors`}
+                      className="truncate text-sm font-semibold text-accent hover:underline"
+                    >
+                      {m.cipTitle.replace(/\.+$/, '')}
+                    </Link>
+                  </div>
+                  <p className="mb-2 text-xs text-text-secondary">{category}</p>
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-text-secondary">Median 1yr</span>
+                      <span className="font-medium text-earn-above">{formatCurrency(m.medianEarn1yr)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-secondary">Median 5yr</span>
+                      <span className="font-medium text-earn-above">{formatCurrency(m.medianEarn5yr)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-secondary">Growth</span>
+                      <span className={`font-medium ${(m.growthRate ?? 0) > 0 ? 'text-earn-above' : 'text-text-secondary'}`}>
+                        {m.growthRate != null ? `${m.growthRate > 0 ? '+' : ''}${m.growthRate}%` : '\u2014'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-secondary">Schools</span>
+                      <span>{formatNumber(m.schoolCount)}</span>
+                    </div>
+                    <hr className="border-gray-100" />
+                    <div className="flex justify-between">
+                      <span className="text-text-secondary">1yr Range</span>
+                      <span>{formatCurrency(m.p25Earn1yr)}&ndash;{formatCurrency(m.p75Earn1yr)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-secondary">5yr Range</span>
+                      <span>{formatCurrency(m.p25Earn5yr)}&ndash;{formatCurrency(m.p75Earn5yr)}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Controls: search + min schools */}
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-3">
@@ -327,6 +424,11 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
           </select>
           <span className="text-xs text-text-secondary">
             {filtered.length} of {majorsSummary.length} majors
+            {compareSet.size > 0 && (
+              <span className="ml-2 rounded-full bg-accent/10 px-2 py-0.5 text-accent">
+                {compareSet.size}/4 selected
+              </span>
+            )}
           </span>
         </div>
         <div className="relative">
@@ -352,6 +454,7 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
         <table className="w-full text-left">
           <thead className="border-b border-gray-100 bg-gray-50/50">
             <tr>
+              <th className="w-10 px-2 py-2.5" />
               <th className="px-3 py-2.5 text-right text-xs font-semibold text-text-secondary w-10">#</th>
               <SortableHeader<SortKey>
                 label="Major"
@@ -398,9 +501,21 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
             {paginated.map((m, i) => (
               <tr
                 key={m.cipCode}
-                onClick={() => router.push(`/majors/${encodeURIComponent(m.cipCode)}?from=majors`)}
+                onClick={() => { trackEvent('major_click', { cipCode: m.cipCode }); router.push(`/majors/${encodeURIComponent(m.cipCode)}?from=majors`); }}
                 className="cursor-pointer border-b border-gray-50 transition-colors hover:bg-gray-50"
               >
+                <td
+                  className="w-10 px-2 py-2.5"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    checked={compareSet.has(m.cipCode)}
+                    onChange={() => handleCompareToggle(m.cipCode)}
+                    disabled={!compareSet.has(m.cipCode) && compareSet.size >= 4}
+                    className="h-3.5 w-3.5 rounded border-gray-300 text-accent accent-accent"
+                  />
+                </td>
                 <td className="px-3 py-2.5 text-right text-xs tabular-nums text-text-secondary w-10">
                   {(currentPage - 1) * PAGE_SIZE + i + 1}
                 </td>
@@ -431,7 +546,7 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
             {paginated.length === 0 && (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className="px-3 py-8 text-center text-sm text-text-secondary"
                 >
                   No majors match your search

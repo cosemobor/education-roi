@@ -1,20 +1,67 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import {
+  ScatterChart,
+  Scatter,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  ReferenceLine,
+  ResponsiveContainer,
+  Legend,
+} from 'recharts';
 import Link from 'next/link';
 import type { MajorSummary, ProgramRecord, SortDir } from '@/types';
-import { formatCurrency, formatRate, formatNumber, formatPercent } from '@/lib/formatters';
-import { getDisplayTier, TIER_COLORS } from '@/lib/tiers';
+import { formatCurrency, formatCompact, formatRate, formatNumber, formatPercent } from '@/lib/formatters';
+import { getDisplayTier, TIER_COLORS, TIER_ORDER } from '@/lib/tiers';
 import { generateMajorDescription } from '@/lib/descriptions';
 import StatCard from './StatCard';
 
+type EarningsKey = 'earn1yr' | 'earn5yr';
 type SortField = 'schoolName' | 'earn1yr' | 'earn5yr' | 'cost' | 'multiple' | 'admissionRate';
 
 const PAGE_SIZE = 25;
 
+interface DotDatum {
+  x: number;
+  y: number;
+  unitId: number;
+  schoolName: string;
+  state: string;
+  tier: string;
+  credTitle: string;
+  costAttendance: number;
+  earnings: number;
+}
+
+function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: DotDatum }> }) {
+  if (!active || !payload?.[0]) return null;
+  const d = payload[0].payload;
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-lg">
+      <p className="text-sm font-semibold text-text-primary">{d.schoolName}</p>
+      <p className="text-xs text-text-secondary">{d.state} &middot; {d.credTitle}</p>
+      <div className="mt-1.5 flex gap-4 text-xs">
+        <span>Earnings: <strong className="text-earn-above">{formatCurrency(d.earnings)}</strong></span>
+        <span>Cost: <strong>{formatCurrency(d.costAttendance)}</strong></span>
+      </div>
+      <span
+        className="mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium text-white"
+        style={{ backgroundColor: TIER_COLORS[d.tier] ?? '#9ca3af' }}
+      >
+        {d.tier}
+      </span>
+      <p className="mt-1.5 text-[10px] text-text-secondary">Click to view school</p>
+    </div>
+  );
+}
+
 interface MajorDetailProps {
   major: MajorSummary;
   programs: ProgramRecord[];
+  fromTab?: string;
 }
 
 interface RankedRow {
@@ -32,13 +79,25 @@ interface RankedRow {
   satCombined: number | null;
 }
 
-export default function MajorDetail({ major, programs }: MajorDetailProps) {
+export default function MajorDetail({ major, programs, fromTab }: MajorDetailProps) {
   const [sortField, setSortField] = useState<SortField>('earn1yr');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [ownershipFilter, setOwnershipFilter] = useState<number | null>(null);
   const [stateFilter, setStateFilter] = useState('');
   const [page, setPage] = useState(1);
+  const [earningsKey, setEarningsKey] = useState<EarningsKey>('earn1yr');
+  const [selectedSchool, setSelectedSchool] = useState<number | null>(null);
+  const chartRef = useRef<HTMLDivElement>(null);
+
+  // Close detail card on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedSchool(null);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   const states = useMemo(() => {
     const s = new Set(programs.map((p) => p.state).filter(Boolean));
@@ -92,6 +151,94 @@ export default function MajorDetail({ major, programs }: MajorDetailProps) {
     return rows;
   }, [allRows, searchQuery, ownershipFilter, stateFilter, programs]);
 
+  // Chart data — filtered rows with valid cost + earnings
+  const chartFiltered = useMemo(() => {
+    return filtered.filter((r) => r.cost > 0 && r[earningsKey] != null);
+  }, [filtered, earningsKey]);
+
+  const tierData = useMemo(() => {
+    const groups: Record<string, DotDatum[]> = {};
+    for (const r of chartFiltered) {
+      if (!groups[r.tier]) groups[r.tier] = [];
+      groups[r.tier].push({
+        x: r.cost,
+        y: r[earningsKey]!,
+        unitId: r.unitId,
+        schoolName: r.schoolName,
+        state: r.state,
+        tier: r.tier,
+        credTitle: r.credTitle,
+        costAttendance: r.cost,
+        earnings: r[earningsKey]!,
+      });
+    }
+    return groups;
+  }, [chartFiltered, earningsKey]);
+
+  const { yDomain, xDomain } = useMemo(() => {
+    if (!chartFiltered.length)
+      return {
+        yDomain: [0, 100000] as [number, number],
+        xDomain: [0, 80000] as [number, number],
+      };
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const r of chartFiltered) {
+      const x = r.cost;
+      const y = r[earningsKey]!;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    const yPad = (maxY - minY) * 0.1 || 5000;
+    const xPad = (maxX - minX) * 0.05 || 2000;
+    return {
+      yDomain: [Math.max(0, minY - yPad), maxY + yPad] as [number, number],
+      xDomain: [Math.max(0, minX - xPad), maxX + xPad] as [number, number],
+    };
+  }, [chartFiltered, earningsKey]);
+
+  const medianLine = earningsKey === 'earn1yr' ? major.medianEarn1yr : major.medianEarn5yr;
+
+  const earningsLabel = earningsKey === 'earn1yr' ? '1-Year' : '5-Year';
+
+  const handleDotClick = useCallback((data: any) => {
+    const uid = data?.unitId ?? data?.payload?.unitId;
+    if (uid != null) {
+      setSelectedSchool((prev) => (prev === uid ? null : uid));
+    }
+  }, []);
+
+  const handleRowClick = useCallback((unitId: number) => {
+    setSelectedSchool((prev) => (prev === unitId ? null : unitId));
+    chartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, []);
+
+  const selectedRow = useMemo(() => {
+    if (selectedSchool == null) return null;
+    return filtered.find((r) => r.unitId === selectedSchool) ?? null;
+  }, [selectedSchool, filtered]);
+
+  // Custom dot shape — highlights selected school
+  const renderDot = useCallback(
+    (props: any) => {
+      const { cx, cy, fill, payload } = props;
+      if (cx == null || cy == null) return <circle cx={0} cy={0} r={0} />;
+      const uid = payload?.unitId;
+      const isSelected = uid != null && uid === selectedSchool;
+      if (isSelected) {
+        return (
+          <g>
+            <circle cx={cx} cy={cy} r={14} fill={fill} opacity={0.12} />
+            <circle cx={cx} cy={cy} r={7} fill={fill} stroke="#1a1a1a" strokeWidth={2.5} />
+          </g>
+        );
+      }
+      return <circle cx={cx} cy={cy} r={5} fill={fill} opacity={0.75} />;
+    },
+    [selectedSchool],
+  );
+
   // Sort
   const sorted = useMemo(() => {
     const rows = [...filtered];
@@ -121,16 +268,14 @@ export default function MajorDetail({ major, programs }: MajorDetailProps) {
   );
 
   const handleSort = useCallback((field: SortField) => {
-    setSortField((prev) => {
-      if (prev === field) {
-        setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-        return prev;
-      }
+    if (field === sortField) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
       setSortDir(field === 'schoolName' ? 'asc' : 'desc');
-      return field;
-    });
+    }
     setPage(1);
-  }, []);
+  }, [sortField]);
 
   const sortArrow = (field: SortField) => {
     if (sortField !== field) return ' \u21D5';
@@ -159,13 +304,13 @@ export default function MajorDetail({ major, programs }: MajorDetailProps) {
     <div>
       {/* Back link + title */}
       <Link
-        href="/"
+        href={`/?tab=${fromTab || 'majors'}`}
         className="mb-4 inline-block text-sm text-accent hover:underline"
       >
         &larr; All Majors
       </Link>
       <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
-        {major.cipTitle}
+        {major.cipTitle.replace(/\.+$/, '')}
       </h1>
       <p className="mt-1 text-sm text-text-secondary">
         CIP {major.cipCode} &middot; {major.schoolCount} schools
@@ -190,6 +335,173 @@ export default function MajorDetail({ major, programs }: MajorDetailProps) {
           value={formatPercent(major.growthRate)}
         />
       </div>
+
+      {/* Scatter chart */}
+      {chartFiltered.length > 0 && (
+        <div className="mt-6 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-text-primary">
+              Earnings vs. Cost &mdash; {chartFiltered.length} Schools
+            </h2>
+            <div className="flex rounded-lg border border-gray-200 text-xs">
+              <button
+                onClick={() => setEarningsKey('earn1yr')}
+                className={`px-3 py-1.5 transition-colors rounded-l-lg ${
+                  earningsKey === 'earn1yr'
+                    ? 'bg-accent text-white'
+                    : 'text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                1-Year
+              </button>
+              <button
+                onClick={() => setEarningsKey('earn5yr')}
+                className={`px-3 py-1.5 transition-colors rounded-r-lg ${
+                  earningsKey === 'earn5yr'
+                    ? 'bg-accent text-white'
+                    : 'text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                5-Year
+              </button>
+            </div>
+          </div>
+
+          <div
+            ref={chartRef}
+            className="rounded-lg border border-gray-100 bg-white p-2 shadow-sm sm:p-4"
+            style={{ userSelect: 'none', WebkitTapHighlightColor: 'transparent' }}
+            onMouseDown={(e) => {
+              if ((e.target as HTMLElement).closest?.('svg')) e.preventDefault();
+            }}
+          >
+            <ResponsiveContainer width="100%" height={420}>
+              <ScatterChart margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis
+                  dataKey="x"
+                  type="number"
+                  name="Cost"
+                  domain={xDomain}
+                  tickFormatter={(v: number) => formatCompact(v)}
+                  tick={{ fontSize: 11, fill: '#6b7280' }}
+                  label={{
+                    value: 'Cost of Attendance',
+                    position: 'insideBottom',
+                    offset: -10,
+                    fontSize: 12,
+                    fill: '#6b7280',
+                  }}
+                />
+                <YAxis
+                  dataKey="y"
+                  type="number"
+                  name="Earnings"
+                  domain={yDomain}
+                  tickFormatter={(v: number) => formatCompact(v)}
+                  tick={{ fontSize: 11, fill: '#6b7280' }}
+                  width={60}
+                  label={{
+                    value: `${earningsLabel} Earnings`,
+                    angle: -90,
+                    position: 'insideLeft',
+                    offset: 5,
+                    fontSize: 12,
+                    fill: '#6b7280',
+                  }}
+                />
+                <Tooltip content={<ChartTooltip />} cursor={false} />
+                {medianLine && (
+                  <ReferenceLine
+                    y={medianLine}
+                    stroke="#6b7280"
+                    strokeDasharray="6 4"
+                    label={{
+                      value: `National Median ${formatCompact(medianLine)}`,
+                      position: 'right',
+                      fontSize: 11,
+                      fill: '#6b7280',
+                    }}
+                  />
+                )}
+                <Legend
+                  verticalAlign="top"
+                  wrapperStyle={{ fontSize: 11, paddingBottom: 8 }}
+                />
+                {TIER_ORDER.map(
+                  (tier) =>
+                    tierData[tier] && (
+                      <Scatter
+                        key={tier}
+                        name={tier}
+                        data={tierData[tier]}
+                        fill={TIER_COLORS[tier]}
+                        shape={renderDot}
+                        onClick={handleDotClick}
+                      />
+                    ),
+                )}
+              </ScatterChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Detail card — shown when a school dot is selected */}
+          {selectedRow && (
+            <div className="mt-3 rounded-lg border border-accent/30 bg-accent/5 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="inline-block h-3 w-3 flex-shrink-0 rounded-full"
+                      style={{ backgroundColor: TIER_COLORS[selectedRow.tier] ?? '#9ca3af' }}
+                    />
+                    <span className="truncate text-base font-semibold text-text-primary">
+                      {selectedRow.schoolName}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-text-secondary">
+                    {selectedRow.state} &middot; {selectedRow.credTitle} &middot; {selectedRow.tier}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setSelectedSchool(null)}
+                  className="rounded-lg px-2 py-1 text-lg text-text-secondary hover:text-text-primary"
+                >
+                  &times;
+                </button>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">1yr Earnings</p>
+                  <p className="text-sm font-semibold text-earn-above">{formatCurrency(selectedRow.earn1yr)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">5yr Earnings</p>
+                  <p className="text-sm font-semibold text-earn-above">
+                    {selectedRow.earn5yr != null ? formatCurrency(selectedRow.earn5yr) : '\u2014'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Cost</p>
+                  <p className="text-sm font-semibold">{selectedRow.cost > 0 ? formatCurrency(selectedRow.cost) : '\u2014'}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">ROI</p>
+                  <p className="text-sm font-semibold">{selectedRow.multiple > 0 ? selectedRow.multiple.toFixed(1) + 'x' : '\u2014'}</p>
+                </div>
+              </div>
+
+              <Link
+                href={`/schools/${selectedRow.unitId}?from=majors`}
+                className="mt-3 inline-block text-xs font-medium text-accent hover:underline"
+              >
+                View school details &rarr;
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="mt-6 flex flex-wrap items-end gap-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
@@ -339,7 +651,10 @@ export default function MajorDetail({ major, programs }: MajorDetailProps) {
             {paginated.map((r) => (
               <tr
                 key={`${r.unitId}-${r.rank}`}
-                className="border-t border-gray-50 transition-colors hover:bg-gray-50"
+                className={`cursor-pointer border-t border-gray-50 transition-colors ${
+                  selectedSchool === r.unitId ? 'bg-accent/10' : 'hover:bg-gray-50'
+                }`}
+                onClick={() => handleRowClick(r.unitId)}
               >
                 <td className="px-3 py-2 text-text-secondary">{r.rank}</td>
                 <td className="px-3 py-2">
@@ -351,7 +666,7 @@ export default function MajorDetail({ major, programs }: MajorDetailProps) {
                       }}
                     />
                     <Link
-                      href={`/schools/${r.unitId}`}
+                      href={`/schools/${r.unitId}?from=majors`}
                       className="font-medium text-accent hover:underline"
                       onClick={(e) => e.stopPropagation()}
                     >

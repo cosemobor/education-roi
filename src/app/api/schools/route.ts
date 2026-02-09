@@ -2,8 +2,18 @@ import { getDb } from '@/lib/db';
 import { schools } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { type NextRequest } from 'next/server';
+import { createRateLimiter, getClientIp } from '@/lib/rate-limit';
+
+const checkLimit = createRateLimiter('schools', 60_000, 60);
 
 export async function GET(request: NextRequest) {
+  const ip = getClientIp(request);
+  if (checkLimit(ip)) {
+    return Response.json(
+      { error: 'Too many requests. Please try again later.' },
+      { status: 429 },
+    );
+  }
   const db = getDb();
   const { searchParams } = request.nextUrl;
   const id = searchParams.get('id');

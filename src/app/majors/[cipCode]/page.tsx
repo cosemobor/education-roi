@@ -24,14 +24,15 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 
   if (!row) return { title: 'Major Not Found' };
 
+  const cleanTitle = row.cipTitle.replace(/\.+$/, '');
   const description = row.medianEarn1yr
-    ? `${row.cipTitle} graduates earn a median of $${Math.round(row.medianEarn1yr).toLocaleString()} in their first year.`
-    : `Explore earnings data for ${row.cipTitle} across all schools.`;
+    ? `${cleanTitle} graduates earn a median of $${Math.round(row.medianEarn1yr).toLocaleString()} in their first year.`
+    : `Explore earnings data for ${cleanTitle} across all schools.`;
 
   return {
-    title: row.cipTitle,
+    title: cleanTitle,
     description,
-    openGraph: { title: `${row.cipTitle} - Education ROI`, description },
+    openGraph: { title: `${cleanTitle} - HEO`, description },
   };
 }
 
@@ -60,7 +61,7 @@ export default async function MajorPage({ params, searchParams }: PageProps) {
 
   const major: MajorSummary = {
     cipCode: majorRow.cipCode,
-    cipTitle: majorRow.cipTitle,
+    cipTitle: majorRow.cipTitle.replace(/\.+$/, ''),
     schoolCount: majorRow.schoolCount ?? 0,
     medianEarn1yr: majorRow.medianEarn1yr,
     medianEarn4yr: majorRow.medianEarn4yr,
@@ -107,7 +108,7 @@ export default async function MajorPage({ params, searchParams }: PageProps) {
     schoolName: r.schoolName ?? '',
     state: r.state ?? '',
     cipCode: r.cipCode,
-    cipTitle: r.cipTitle ?? '',
+    cipTitle: (r.cipTitle ?? '').replace(/\.+$/, ''),
     credLevel: r.credLevel ?? 0,
     credTitle: r.credTitle ?? '',
     earn1yr: r.earn1yr,

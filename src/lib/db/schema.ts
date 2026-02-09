@@ -59,3 +59,16 @@ export const majorsSummary = sqliteTable('majors_summary', {
   p75Earn5yr: real('p75_earn_5yr'),
   growthRate: real('growth_rate'),
 });
+
+export const analyticsEvents = sqliteTable('analytics_events', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  sessionId: text('session_id').notNull(),
+  eventType: text('event_type').notNull(),
+  eventData: text('event_data'),
+  page: text('page'),
+  timestamp: integer('timestamp', { mode: 'timestamp' }).notNull(),
+}, (table) => [
+  index('idx_analytics_session').on(table.sessionId),
+  index('idx_analytics_type').on(table.eventType),
+  index('idx_analytics_timestamp').on(table.timestamp),
+]);

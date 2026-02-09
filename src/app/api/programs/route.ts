@@ -2,8 +2,19 @@ import { getDb } from '@/lib/db';
 import { programs, schools } from '@/lib/db/schema';
 import { eq, and, desc, isNotNull } from 'drizzle-orm';
 import { type NextRequest } from 'next/server';
+import { createRateLimiter, getClientIp } from '@/lib/rate-limit';
+
+const checkLimit = createRateLimiter('programs', 60_000, 60);
 
 export async function GET(request: NextRequest) {
+  const ip = getClientIp(request);
+  if (checkLimit(ip)) {
+    return Response.json(
+      { error: 'Too many requests. Please try again later.' },
+      { status: 429 },
+    );
+  }
+
   const db = getDb();
   const { searchParams } = request.nextUrl;
   const cip = searchParams.get('cip');
@@ -84,7 +95,12 @@ export async function GET(request: NextRequest) {
       ? 'public, s-maxage=86400, stale-while-revalidate=604800'
       : 'no-store';
 
-  return Response.json({ data: rows }, {
+  const cleaned = rows.map((r) => ({
+    ...r,
+    cipTitle: (r.cipTitle ?? '').replace(/\.+$/, ''),
+  }));
+
+  return Response.json({ data: cleaned }, {
     headers: { 'Cache-Control': cacheControl },
   });
 }
