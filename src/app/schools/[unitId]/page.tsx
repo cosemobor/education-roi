@@ -31,7 +31,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   return {
     title: row.name,
     description,
-    openGraph: { title: `${row.name} - HEO`, description },
+    openGraph: { title: `${row.name} - HEO`, description, images: ['/og-image.jpg'] },
   };
 }
 
