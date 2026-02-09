@@ -15,16 +15,16 @@ interface PageNavProps {
 
 export default function PageNav({ activeTab, onTabChange }: PageNavProps) {
   return (
-    <nav className="mb-6 flex items-center gap-2 sm:gap-3">
-      <span className="text-sm font-bold text-text-primary sm:text-base">
+    <nav className="mb-6 flex items-center gap-1.5 overflow-x-auto sm:gap-3">
+      <span className="flex-shrink-0 text-sm font-bold text-text-primary sm:text-base">
         EduROI
       </span>
-      <div className="h-4 w-px bg-gray-300" />
+      <div className="h-4 w-px flex-shrink-0 bg-gray-300" />
       {TABS.map(({ key, label }) => (
         <button
           key={key}
           onClick={() => onTabChange(key)}
-          className={`rounded-md px-2 py-1 text-xs transition-colors sm:text-sm ${
+          className={`flex-shrink-0 rounded-md px-2.5 py-2 text-xs transition-colors sm:px-3 sm:text-sm ${
             activeTab === key
               ? 'bg-accent/10 font-semibold text-accent'
               : 'text-text-secondary hover:text-text-primary'

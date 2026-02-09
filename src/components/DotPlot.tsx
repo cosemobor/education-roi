@@ -97,6 +97,16 @@ export default function DotPlot({ majorsSummary }: DotPlotProps) {
   const didAutoSelect = useRef(false);
   const chartRef = useRef<HTMLDivElement>(null);
 
+  // Responsive hook for chart config (Recharts needs JS values, not CSS classes)
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mql = window.matchMedia('(max-width: 639px)');
+    setIsMobile(mql.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
+
   // Close detail card on Escape
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -442,8 +452,8 @@ export default function DotPlot({ majorsSummary }: DotPlotProps) {
       {/* Filter bar */}
       {programs.length > 0 && (
         <div className="space-y-2">
-          <div className="flex flex-wrap items-end gap-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
-            <div>
+          <div className="grid grid-cols-2 items-end gap-3 rounded-lg border border-gray-100 bg-gray-50 p-3 sm:flex sm:flex-wrap">
+            <div className="col-span-2">
               <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-text-secondary">
                 School Type
               </label>
@@ -457,7 +467,7 @@ export default function DotPlot({ majorsSummary }: DotPlotProps) {
                   <button
                     key={String(val)}
                     onClick={() => setOwnershipFilter(val)}
-                    className={`px-2.5 py-1.5 transition-colors first:rounded-l-lg last:rounded-r-lg ${
+                    className={`flex-1 px-2.5 py-1.5 transition-colors first:rounded-l-lg last:rounded-r-lg sm:flex-none ${
                       ownershipFilter === val
                         ? 'bg-accent text-white'
                         : 'text-text-secondary hover:text-text-primary'
@@ -477,7 +487,7 @@ export default function DotPlot({ majorsSummary }: DotPlotProps) {
                 <select
                   value={stateFilter}
                   onChange={(e) => setStateFilter(e.target.value)}
-                  className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent"
+                  className="w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent sm:w-auto"
                 >
                   <option value="">All States</option>
                   {states.map((s) => (
@@ -498,7 +508,7 @@ export default function DotPlot({ majorsSummary }: DotPlotProps) {
                 placeholder="e.g. 1200"
                 value={minSat}
                 onChange={(e) => setMinSat(e.target.value)}
-                className="w-24 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-secondary/50 focus:border-accent"
+                className="w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-secondary/50 focus:border-accent sm:w-24"
               />
             </div>
 
@@ -509,7 +519,7 @@ export default function DotPlot({ majorsSummary }: DotPlotProps) {
               <select
                 value={maxAdmRate}
                 onChange={(e) => setMaxAdmRate(e.target.value)}
-                className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent"
+                className="w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent sm:w-auto"
               >
                 <option value="">Any</option>
                 <option value="10">Under 10%</option>
@@ -527,7 +537,7 @@ export default function DotPlot({ majorsSummary }: DotPlotProps) {
                   setMinSat('');
                   setMaxAdmRate('');
                 }}
-                className="rounded-lg px-2 py-1.5 text-xs text-accent hover:bg-accent/10"
+                className="col-span-2 rounded-lg px-2 py-1.5 text-xs text-accent hover:bg-accent/10 sm:col-span-1"
               >
                 Clear filters
               </button>
@@ -697,8 +707,14 @@ export default function DotPlot({ majorsSummary }: DotPlotProps) {
               if ((e.target as HTMLElement).closest?.('svg')) e.preventDefault();
             }}
           >
-            <ResponsiveContainer width="100%" height={420}>
-              <ScatterChart margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
+            <ResponsiveContainer width="100%" height={isMobile ? 300 : 420}>
+              <ScatterChart
+                margin={
+                  isMobile
+                    ? { top: 5, right: 10, bottom: 10, left: 0 }
+                    : { top: 10, right: 20, bottom: 20, left: 10 }
+                }
+              >
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis
                   dataKey="x"
@@ -706,14 +722,18 @@ export default function DotPlot({ majorsSummary }: DotPlotProps) {
                   name="Cost"
                   domain={xDomain}
                   tickFormatter={(v: number) => formatCompact(v)}
-                  tick={{ fontSize: 11, fill: '#6b7280' }}
-                  label={{
-                    value: 'Cost of Attendance',
-                    position: 'insideBottom',
-                    offset: -10,
-                    fontSize: 12,
-                    fill: '#6b7280',
-                  }}
+                  tick={{ fontSize: isMobile ? 10 : 11, fill: '#6b7280' }}
+                  label={
+                    isMobile
+                      ? undefined
+                      : {
+                          value: 'Cost of Attendance',
+                          position: 'insideBottom',
+                          offset: -10,
+                          fontSize: 12,
+                          fill: '#6b7280',
+                        }
+                  }
                 />
                 <YAxis
                   dataKey="y"
@@ -721,16 +741,20 @@ export default function DotPlot({ majorsSummary }: DotPlotProps) {
                   name="Earnings"
                   domain={yDomain}
                   tickFormatter={(v: number) => formatCompact(v)}
-                  tick={{ fontSize: 11, fill: '#6b7280' }}
-                  width={60}
-                  label={{
-                    value: `${earningsLabel} Earnings`,
-                    angle: -90,
-                    position: 'insideLeft',
-                    offset: 5,
-                    fontSize: 12,
-                    fill: '#6b7280',
-                  }}
+                  tick={{ fontSize: isMobile ? 10 : 11, fill: '#6b7280' }}
+                  width={isMobile ? 45 : 60}
+                  label={
+                    isMobile
+                      ? undefined
+                      : {
+                          value: `${earningsLabel} Earnings`,
+                          angle: -90,
+                          position: 'insideLeft',
+                          offset: 5,
+                          fontSize: 12,
+                          fill: '#6b7280',
+                        }
+                  }
                 />
                 <Tooltip content={<CustomTooltip />} cursor={false} />
                 {medianLine && (
@@ -739,16 +763,18 @@ export default function DotPlot({ majorsSummary }: DotPlotProps) {
                     stroke="#6b7280"
                     strokeDasharray="6 4"
                     label={{
-                      value: `National Median ${formatCompact(medianLine)}`,
-                      position: 'right',
-                      fontSize: 11,
+                      value: isMobile
+                        ? formatCompact(medianLine)
+                        : `National Median ${formatCompact(medianLine)}`,
+                      position: isMobile ? 'insideTopLeft' : 'right',
+                      fontSize: isMobile ? 10 : 11,
                       fill: '#6b7280',
                     }}
                   />
                 )}
                 <Legend
                   verticalAlign="top"
-                  wrapperStyle={{ fontSize: 11, paddingBottom: 8 }}
+                  wrapperStyle={{ fontSize: isMobile ? 10 : 11, paddingBottom: isMobile ? 4 : 8 }}
                 />
                 {TIER_ORDER.map(
                   (tier) =>
@@ -931,34 +957,36 @@ export default function DotPlot({ majorsSummary }: DotPlotProps) {
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-gray-50 text-left">
                   <tr>
-                    <th className="w-10 px-2 py-2" />
-                    <th className="px-4 py-2 font-medium text-text-secondary">#</th>
+                    <th className="hidden w-10 px-2 py-2 sm:table-cell" />
+                    <th className="px-2 py-2 font-medium text-text-secondary sm:px-4">#</th>
                     <th
-                      className="cursor-pointer px-4 py-2 font-medium text-text-secondary hover:text-text-primary"
+                      className="cursor-pointer px-2 py-2 font-medium text-text-secondary hover:text-text-primary sm:px-4"
                       onClick={() => handleSort('schoolName')}
                     >
                       School{sortArrow('schoolName')}
                     </th>
                     <th
-                      className="cursor-pointer px-4 py-2 text-right font-medium text-text-secondary hover:text-text-primary"
+                      className="cursor-pointer px-2 py-2 text-right font-medium text-text-secondary hover:text-text-primary sm:px-4"
                       onClick={() => handleSort('earn1yr')}
                     >
-                      1yr Earnings{sortArrow('earn1yr')}
+                      <span className="sm:hidden">1yr</span>
+                      <span className="hidden sm:inline">1yr Earnings</span>
+                      {sortArrow('earn1yr')}
                     </th>
                     <th
-                      className="cursor-pointer px-4 py-2 text-right font-medium text-text-secondary hover:text-text-primary"
+                      className="hidden cursor-pointer px-4 py-2 text-right font-medium text-text-secondary hover:text-text-primary sm:table-cell"
                       onClick={() => handleSort('earn5yr')}
                     >
                       5yr Earnings{sortArrow('earn5yr')}
                     </th>
                     <th
-                      className="cursor-pointer px-4 py-2 text-right font-medium text-text-secondary hover:text-text-primary"
+                      className="hidden cursor-pointer px-4 py-2 text-right font-medium text-text-secondary hover:text-text-primary sm:table-cell"
                       onClick={() => handleSort('cost')}
                     >
                       Cost{sortArrow('cost')}
                     </th>
                     <th
-                      className="cursor-pointer px-4 py-2 text-right font-medium text-text-secondary hover:text-text-primary"
+                      className="cursor-pointer px-2 py-2 text-right font-medium text-text-secondary hover:text-text-primary sm:px-4"
                       onClick={() => handleSort('multiple')}
                     >
                       ROI{sortArrow('multiple')}
@@ -977,7 +1005,7 @@ export default function DotPlot({ majorsSummary }: DotPlotProps) {
                       onClick={() => handleRowClick(r.unitId)}
                     >
                       <td
-                        className="w-10 px-2 py-2"
+                        className="hidden w-10 px-2 py-2 sm:table-cell"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <input
@@ -990,8 +1018,8 @@ export default function DotPlot({ majorsSummary }: DotPlotProps) {
                           className="h-3.5 w-3.5 rounded border-gray-300 text-accent accent-accent"
                         />
                       </td>
-                      <td className="px-4 py-2 text-text-secondary">{r.rank}</td>
-                      <td className="px-4 py-2">
+                      <td className="px-2 py-2 text-text-secondary sm:px-4">{r.rank}</td>
+                      <td className="max-w-[140px] px-2 py-2 sm:max-w-none sm:px-4">
                         <span className="flex items-center gap-1.5">
                           <span
                             className="inline-block h-2 w-2 flex-shrink-0 rounded-full"
@@ -1001,24 +1029,24 @@ export default function DotPlot({ majorsSummary }: DotPlotProps) {
                           />
                           <Link
                             href={`/schools/${r.unitId}`}
-                            className="font-medium text-accent hover:underline"
+                            className="truncate font-medium text-accent hover:underline"
                             onClick={(e) => e.stopPropagation()}
                           >
                             {r.schoolName}
                           </Link>
-                          <span className="text-text-secondary">{r.state}</span>
+                          <span className="flex-shrink-0 text-text-secondary">{r.state}</span>
                         </span>
                       </td>
-                      <td className="px-4 py-2 text-right font-medium text-earn-above">
+                      <td className="px-2 py-2 text-right font-medium text-earn-above sm:px-4">
                         {formatCurrency(r.earn1yr)}
                       </td>
-                      <td className="px-4 py-2 text-right font-medium text-earn-above">
+                      <td className="hidden px-4 py-2 text-right font-medium text-earn-above sm:table-cell">
                         {r.earn5yr != null ? formatCurrency(r.earn5yr) : '—'}
                       </td>
-                      <td className="px-4 py-2 text-right text-text-secondary">
+                      <td className="hidden px-4 py-2 text-right text-text-secondary sm:table-cell">
                         {formatCurrency(r.cost)}
                       </td>
-                      <td className="px-4 py-2 text-right font-semibold text-text-primary">
+                      <td className="px-2 py-2 text-right font-semibold text-text-primary sm:px-4">
                         {r.multiple.toFixed(1)}x
                       </td>
                     </tr>
