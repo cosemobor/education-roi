@@ -58,7 +58,7 @@ interface MajorRankingsProps {
 
 export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
   const router = useRouter();
-  const [sortKey, setSortKey] = useState<SortKey>('medianEarn1yr');
+  const [sortKey, setSortKey] = useState<SortKey>('medianEarn5yr');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [minSchools, setMinSchools] = useState(10);
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -125,10 +125,10 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
   );
 
   const stats = useMemo(() => {
-    const withEarn = filtered.filter((m) => m.medianEarn1yr != null);
+    const withEarn = filtered.filter((m) => m.medianEarn5yr != null);
     const highest = withEarn.length
       ? withEarn.reduce((best, m) =>
-          (m.medianEarn1yr ?? 0) > (best.medianEarn1yr ?? 0) ? m : best,
+          (m.medianEarn5yr ?? 0) > (best.medianEarn5yr ?? 0) ? m : best,
           withEarn[0],
         )
       : null;
@@ -238,7 +238,7 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
         <StatCard label="Total Majors" value={formatNumber(stats.total)} />
         <StatCard
           label="Highest Earning Major"
-          value={stats.highest ? formatCurrency(stats.highest.medianEarn1yr) : '\u2014'}
+          value={stats.highest ? formatCurrency(stats.highest.medianEarn5yr) : '\u2014'}
           detail={stats.highest?.cipTitle.replace(/\.+$/, '')}
         />
         <StatCard
@@ -464,16 +464,16 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
                 onClick={handleSort}
               />
               <SortableHeader<SortKey>
-                label="Median 1yr"
-                sortKey="medianEarn1yr"
+                label="Median 5yr"
+                sortKey="medianEarn5yr"
                 currentSortKey={sortKey}
                 currentSortDir={sortDir}
                 onClick={handleSort}
                 className="text-right"
               />
               <SortableHeader<SortKey>
-                label="Median 5yr"
-                sortKey="medianEarn5yr"
+                label="Median 1yr"
+                sortKey="medianEarn1yr"
                 currentSortKey={sortKey}
                 currentSortDir={sortDir}
                 onClick={handleSort}
@@ -524,10 +524,10 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
                   <span className="ml-2 text-xs text-accent">&rarr;</span>
                 </td>
                 <td className="px-3 py-2.5 text-right text-sm tabular-nums text-text-primary">
-                  {formatCurrency(m.medianEarn1yr)}
+                  {formatCurrency(m.medianEarn5yr)}
                 </td>
                 <td className="hidden px-3 py-2.5 text-right text-sm tabular-nums text-text-primary sm:table-cell">
-                  {formatCurrency(m.medianEarn5yr)}
+                  {formatCurrency(m.medianEarn1yr)}
                 </td>
                 <td
                   className={`hidden px-3 py-2.5 text-right text-sm tabular-nums sm:table-cell ${
