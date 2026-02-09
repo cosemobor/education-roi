@@ -420,11 +420,11 @@ export default function DotPlot({ majorsSummary }: DotPlotProps) {
             placeholder="Search majors..."
           />
         </div>
-        <div>
+        <div className="self-start sm:self-auto">
           <label className="mb-1 block text-xs font-medium text-text-secondary">
             Earnings
           </label>
-          <div className="flex rounded-lg border border-gray-200 text-xs">
+          <div className="inline-flex rounded-lg border border-gray-200 text-xs">
             <button
               onClick={() => setEarningsKey('earn1yr')}
               className={`px-3 py-2 transition-colors ${
