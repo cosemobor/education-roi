@@ -15,6 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://edu.hamindex.com'),
   title: {
     default: 'Higher Education Outcomes - College Earnings Explorer',
     template: '%s | HEO',

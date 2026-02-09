@@ -18,6 +18,7 @@ import { formatCurrency, formatCompact, formatRate, formatNumber, formatPercent 
 import { getDisplayTier, TIER_COLORS, TIER_ORDER } from '@/lib/tiers';
 import { generateMajorDescription } from '@/lib/descriptions';
 import StatCard from './StatCard';
+import ShareButton from './ShareButton';
 
 type EarningsKey = 'earn1yr' | 'earn5yr';
 type SortField = 'schoolName' | 'earn1yr' | 'earn5yr' | 'cost' | 'multiple' | 'admissionRate';
@@ -309,12 +310,17 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
       >
         &larr; All Majors
       </Link>
-      <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
-        {major.cipTitle.replace(/\.+$/, '')}
-      </h1>
-      <p className="mt-1 text-sm text-text-secondary">
-        CIP {major.cipCode} &middot; {major.schoolCount} schools
-      </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
+            {major.cipTitle.replace(/\.+$/, '')}
+          </h1>
+          <p className="mt-1 text-sm text-text-secondary">
+            CIP {major.cipCode} &middot; {major.schoolCount} schools
+          </p>
+        </div>
+        <ShareButton title={`${major.cipTitle.replace(/\.+$/, '')} - Earnings Data`} text={`Earnings data for ${major.cipTitle.replace(/\.+$/, '')} across ${major.schoolCount} schools`} />
+      </div>
       <p className="mt-3 text-sm leading-relaxed text-text-secondary">
         {generateMajorDescription(major)}
       </p>

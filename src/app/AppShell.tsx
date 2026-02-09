@@ -12,6 +12,7 @@ import DotPlot from '@/components/DotPlot';
 import MajorRankings from '@/components/MajorRankings';
 import CollegeRankings from '@/components/CollegeRankings';
 import GuidedTour from '@/components/GuidedTour';
+import ShareButton from '@/components/ShareButton';
 
 interface AppShellProps {
   majorsSummary: MajorSummary[];
@@ -46,9 +47,15 @@ export default function AppShell({ majorsSummary, schoolRankings }: AppShellProp
         Explore earnings outcomes by school and major using College Scorecard
         data
       </p>
-      <Link href="/about" className="mt-1.5 text-xs text-accent hover:underline">
-        About this data &amp; methodology
-      </Link>
+      <div className="mt-1.5 flex items-center gap-3">
+        <Link href="/about" className="text-xs text-accent hover:underline">
+          About this data &amp; methodology
+        </Link>
+        <ShareButton
+          title="Higher Education Outcomes - College Earnings Explorer"
+          text="Explore earnings outcomes by college major and school"
+        />
+      </div>
 
       {activeTab === 'explorer' && (
         <DotPlot majorsSummary={majorsSummary} schoolRankings={schoolRankings} />

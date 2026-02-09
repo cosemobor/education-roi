@@ -22,11 +22,11 @@ export default function PageNav({ activeTab, onTabChange, onStartTour }: PageNav
   const isAbout = pathname === '/about';
 
   return (
-    <nav data-tour="nav-tabs" className="mb-6 flex items-center gap-2 sm:gap-3">
-      <Link href="/" className="text-sm font-bold text-text-primary hover:text-accent sm:text-base">
+    <nav data-tour="nav-tabs" className="mb-6 flex items-center gap-1 sm:gap-3">
+      <Link href="/" className="flex-shrink-0 text-sm font-bold text-text-primary hover:text-accent sm:text-base">
         HEO
       </Link>
-      <div className="h-4 w-px bg-gray-300" />
+      <div className="h-4 w-px flex-shrink-0 bg-gray-300" />
       {TABS.map(({ key, label }) => {
         const isActive = isHome && activeTab === key;
 
@@ -35,7 +35,7 @@ export default function PageNav({ activeTab, onTabChange, onStartTour }: PageNav
             <button
               key={key}
               onClick={() => onTabChange(key)}
-              className={`rounded-md px-2 py-1 text-xs transition-colors sm:text-sm ${
+              className={`flex-shrink-0 rounded-md px-1.5 py-2 text-xs transition-colors sm:px-2 sm:text-sm ${
                 isActive
                   ? 'bg-accent/10 font-semibold text-accent'
                   : 'text-text-secondary hover:text-text-primary'
@@ -50,7 +50,7 @@ export default function PageNav({ activeTab, onTabChange, onStartTour }: PageNav
           <Link
             key={key}
             href={`/?tab=${key}`}
-            className="rounded-md px-2 py-1 text-xs text-text-secondary transition-colors hover:text-text-primary sm:text-sm"
+            className="flex-shrink-0 rounded-md px-1.5 py-2 text-xs text-text-secondary transition-colors hover:text-text-primary sm:px-2 sm:text-sm"
           >
             {label}
           </Link>
@@ -60,7 +60,7 @@ export default function PageNav({ activeTab, onTabChange, onStartTour }: PageNav
       <Link
         href="/about"
         data-tour="about-link"
-        className={`rounded-md px-2 py-1 text-xs transition-colors sm:text-sm ${
+        className={`flex-shrink-0 rounded-md px-1.5 py-2 text-xs transition-colors sm:px-2 sm:text-sm ${
           isAbout
             ? 'bg-accent/10 font-semibold text-accent'
             : 'text-text-secondary hover:text-text-primary'
@@ -72,7 +72,7 @@ export default function PageNav({ activeTab, onTabChange, onStartTour }: PageNav
         href="https://hamindex.com"
         target="_blank"
         rel="noopener noreferrer"
-        className="rounded-md px-2 py-1 text-xs text-text-secondary transition-colors hover:text-text-primary sm:text-sm"
+        className="hidden flex-shrink-0 rounded-md px-2 py-2 text-xs text-text-secondary transition-colors hover:text-text-primary sm:inline sm:text-sm"
       >
         Housing
       </a>
@@ -80,7 +80,7 @@ export default function PageNav({ activeTab, onTabChange, onStartTour }: PageNav
         <button
           onClick={onStartTour}
           title="Take a tour"
-          className="ml-1 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border border-gray-300 text-[10px] font-semibold leading-none text-text-secondary transition-colors hover:border-accent hover:text-accent"
+          className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border border-gray-300 text-[10px] font-semibold leading-none text-text-secondary transition-colors hover:border-accent hover:text-accent sm:ml-1"
         >
           i
         </button>

@@ -16,6 +16,7 @@ import {
 import { getDisplayTier, TIER_COLORS } from '@/lib/tiers';
 import { generateSchoolDescription } from '@/lib/descriptions';
 import StatCard from './StatCard';
+import ShareButton from './ShareButton';
 
 type SortField = 'cipTitle' | 'earn1yr' | 'earn5yr' | 'costAttendance' | 'multiple' | 'credTitle';
 
@@ -187,16 +188,21 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
       >
         &larr; Back
       </Link>
-      <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
-        {school.name}
-      </h1>
-      <p className="mt-1 flex items-center gap-2 text-sm text-text-secondary">
-        <span
-          className="inline-block h-2.5 w-2.5 rounded-full"
-          style={{ backgroundColor: TIER_COLORS[tier] ?? '#9ca3af' }}
-        />
-        {school.city}, {school.state} &middot; {school.ownershipLabel || 'Unknown'} &middot; {tier}
-      </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">
+            {school.name}
+          </h1>
+          <p className="mt-1 flex items-center gap-2 text-sm text-text-secondary">
+            <span
+              className="inline-block h-2.5 w-2.5 rounded-full"
+              style={{ backgroundColor: TIER_COLORS[tier] ?? '#9ca3af' }}
+            />
+            {school.city}, {school.state} &middot; {school.ownershipLabel || 'Unknown'} &middot; {tier}
+          </p>
+        </div>
+        <ShareButton title={`${school.name} - Earnings Data`} text={`Earnings data for ${school.name} programs`} />
+      </div>
       <p className="mt-3 text-sm leading-relaxed text-text-secondary">
         {generateSchoolDescription(school, allRows.length)}
       </p>
