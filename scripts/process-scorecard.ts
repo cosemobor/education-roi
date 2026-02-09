@@ -88,6 +88,7 @@ interface ProgramRecord {
   earn4yr: number | null;
   earn5yr: number | null;
   earn1yrCount: number | null;
+  earn5yrCount: number | null;
   costAttendance: number | null;
   selectivityTier: string;
 }
@@ -203,6 +204,7 @@ function main() {
       earn4yr: p.earn4yr,
       earn5yr: p.earn5yr,
       earn1yrCount: p.earn1yrCount,
+      earn5yrCount: p.earn5yrCount,
       costAttendance: school?.costAttendance ?? null,
       selectivityTier: school?.selectivityTier ?? 'Unknown',
     });

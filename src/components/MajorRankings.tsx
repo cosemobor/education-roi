@@ -2,10 +2,50 @@
 
 import { useState, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import {
+  ScatterChart, Scatter, XAxis, YAxis, Tooltip,
+  CartesianGrid, ResponsiveContainer,
+} from 'recharts';
 import type { MajorSummary, SortDir } from '@/types';
 import StatCard from './StatCard';
 import SortableHeader from './SortableHeader';
-import { formatCurrency, formatPercent, formatNumber } from '@/lib/formatters';
+import { formatCurrency, formatCompact, formatPercent, formatNumber } from '@/lib/formatters';
+import { getCipCategory, CIP_CATEGORY_COLORS, CIP_CATEGORY_ORDER } from '@/lib/cip-categories';
+import { trackEvent } from '@/lib/analytics';
+
+interface MajorScatterDatum {
+  x: number;
+  y: number;
+  cipCode: string;
+  cipTitle: string;
+  category: string;
+  spread: number;
+  median5yr: number;
+  growthRate: number | null;
+  schoolCount: number;
+}
+
+function MajorChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: MajorScatterDatum }> }) {
+  if (!active || !payload?.[0]) return null;
+  const d = payload[0].payload;
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-lg">
+      <p className="text-sm font-semibold text-text-primary">{d.cipTitle.replace(/\.+$/, '')}</p>
+      <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs">
+        <span>Median 5yr: <strong className="text-earn-above">{formatCurrency(d.median5yr)}</strong></span>
+        <span>Spread: <strong>{formatCompact(d.spread)}</strong></span>
+        <span>Growth: <strong className={d.growthRate != null && d.growthRate > 0 ? 'text-earn-above' : 'text-text-secondary'}>{d.growthRate != null ? `${d.growthRate > 0 ? '+' : ''}${d.growthRate}%` : '\u2014'}</strong></span>
+        <span>Schools: <strong>{d.schoolCount}</strong></span>
+      </div>
+      <span
+        className="mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium text-white"
+        style={{ backgroundColor: CIP_CATEGORY_COLORS[d.category] ?? '#6b7280' }}
+      >
+        {d.category}
+      </span>
+    </div>
+  );
+}
 
 type SortKey = 'cipTitle' | 'medianEarn1yr' | 'medianEarn5yr' | 'growthRate' | 'schoolCount';
 
@@ -20,28 +60,36 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
   const [sortKey, setSortKey] = useState<SortKey>('medianEarn1yr');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [minSchools, setMinSchools] = useState(10);
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
 
   const handleSort = useCallback((key: SortKey) => {
-    setSortKey((prev) => {
-      if (prev === key) {
-        setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-        return prev;
-      }
-      setSortDir('desc');
-      return key;
-    });
+    if (key === sortKey) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir(key === 'cipTitle' ? 'asc' : 'desc');
+    }
     setPage(1);
-  }, []);
+  }, [sortKey]);
 
-  // Filter by min schools, then search, then sort
+  // Filter only (no sort) — chart + stats depend on this
   const filtered = useMemo(() => {
     let arr = majorsSummary.filter((m) => m.schoolCount >= minSchools);
+    if (categoryFilter) {
+      arr = arr.filter((m) => getCipCategory(m.cipCode) === categoryFilter);
+    }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       arr = arr.filter((m) => m.cipTitle.toLowerCase().includes(q));
     }
+    return arr;
+  }, [majorsSummary, minSchools, categoryFilter, searchQuery]);
+
+  // Sort separately so chart doesn't re-render on sort change
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
     arr.sort((a, b) => {
       let aVal: string | number | null;
       let bVal: string | number | null;
@@ -65,11 +113,11 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return arr;
-  }, [majorsSummary, sortKey, sortDir, minSchools, searchQuery]);
+  }, [filtered, sortKey, sortDir]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
-  const paginated = filtered.slice(
+  const paginated = sorted.slice(
     (currentPage - 1) * PAGE_SIZE,
     currentPage * PAGE_SIZE,
   );
@@ -92,6 +140,50 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
     return { total: filtered.length, highest, fastestGrowth };
   }, [filtered]);
 
+  // Scatter chart data: 5yr Median Earnings vs Earnings Spread, grouped by category
+  const { categoryData, xDomain, yDomain } = useMemo(() => {
+    const groups: Record<string, MajorScatterDatum[]> = {};
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const m of filtered) {
+      if (m.medianEarn5yr == null || m.p75Earn5yr == null || m.p25Earn5yr == null) continue;
+      const spread = m.p75Earn5yr - m.p25Earn5yr;
+      if (spread <= 0) continue;
+      const category = getCipCategory(m.cipCode);
+      if (!groups[category]) groups[category] = [];
+      groups[category].push({
+        x: m.medianEarn5yr,
+        y: spread,
+        cipCode: m.cipCode,
+        cipTitle: m.cipTitle,
+        category,
+        spread,
+        median5yr: m.medianEarn5yr,
+        growthRate: m.growthRate,
+        schoolCount: m.schoolCount,
+      });
+      if (m.medianEarn5yr < minX) minX = m.medianEarn5yr;
+      if (m.medianEarn5yr > maxX) maxX = m.medianEarn5yr;
+      if (spread < minY) minY = spread;
+      if (spread > maxY) maxY = spread;
+    }
+    const xPad = (maxX - minX) * 0.05 || 5000;
+    const yPad = (maxY - minY) * 0.1 || 5000;
+    return {
+      categoryData: groups,
+      xDomain: [Math.max(0, minX - xPad), maxX + xPad] as [number, number],
+      yDomain: [Math.max(0, minY - yPad), maxY + yPad] as [number, number],
+    };
+  }, [filtered]);
+
+  const hasScatterData = Object.keys(categoryData).length > 0;
+
+  const handleDotClick = useCallback((data: any) => {
+    const code = data?.cipCode ?? data?.payload?.cipCode;
+    if (code != null) {
+      router.push(`/majors/${encodeURIComponent(code)}?from=majors`);
+    }
+  }, [router]);
+
   // Reset page when filters change
   const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value);
@@ -100,6 +192,11 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
 
   const handleMinSchoolsChange = useCallback((value: number) => {
     setMinSchools(value);
+    setPage(1);
+  }, []);
+
+  const handleCategoryChange = useCallback((value: string) => {
+    setCategoryFilter(value);
     setPage(1);
   }, []);
 
@@ -121,7 +218,7 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
         <StatCard
           label="Highest Earning Major"
           value={stats.highest ? formatCurrency(stats.highest.medianEarn1yr) : '\u2014'}
-          detail={stats.highest?.cipTitle}
+          detail={stats.highest?.cipTitle.replace(/\.+$/, '')}
         />
         <StatCard
           label="Fastest Growing Major"
@@ -130,14 +227,90 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
               ? formatPercent(stats.fastestGrowth.growthRate)
               : '\u2014'
           }
-          detail={stats.fastestGrowth?.cipTitle}
+          detail={stats.fastestGrowth?.cipTitle.replace(/\.+$/, '')}
           detailColor="text-earn-above"
         />
       </div>
 
+      {/* Scatter chart: 5yr Median Earnings vs Earnings Spread */}
+      {hasScatterData && (
+        <div
+          className="mb-6 rounded-lg border border-gray-100 bg-white p-2 shadow-sm sm:p-4"
+          style={{ userSelect: 'none', WebkitTapHighlightColor: 'transparent' }}
+          onMouseDown={(e) => {
+            if ((e.target as HTMLElement).closest?.('svg')) e.preventDefault();
+          }}
+        >
+          <ResponsiveContainer width="100%" height={380}>
+            <ScatterChart margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis
+                dataKey="x"
+                type="number"
+                domain={xDomain}
+                tickFormatter={(v: number) => formatCompact(v)}
+                tick={{ fontSize: 11, fill: '#6b7280' }}
+                label={{ value: 'Median 5yr Earnings', position: 'insideBottom', offset: -10, fontSize: 12, fill: '#6b7280' }}
+              />
+              <YAxis
+                dataKey="y"
+                type="number"
+                domain={yDomain}
+                tickFormatter={(v: number) => formatCompact(v)}
+                tick={{ fontSize: 11, fill: '#6b7280' }}
+                width={60}
+                label={{ value: 'Earnings Spread (p75 \u2212 p25)', angle: -90, position: 'insideLeft', offset: 5, fontSize: 12, fill: '#6b7280' }}
+              />
+              <Tooltip content={<MajorChartTooltip />} cursor={false} />
+              {CIP_CATEGORY_ORDER.map(
+                (cat) =>
+                  categoryData[cat] && (
+                    <Scatter
+                      key={cat}
+                      name={cat}
+                      data={categoryData[cat]}
+                      fill={CIP_CATEGORY_COLORS[cat]}
+                      fillOpacity={0.75}
+                      onClick={handleDotClick}
+                    />
+                  ),
+              )}
+            </ScatterChart>
+          </ResponsiveContainer>
+          <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1">
+            {CIP_CATEGORY_ORDER.map((cat) =>
+              categoryData[cat] ? (
+                <span key={cat} className="flex items-center gap-1.5 text-xs text-text-secondary">
+                  <span
+                    className="inline-block h-2.5 w-2.5 rounded-full"
+                    style={{ backgroundColor: CIP_CATEGORY_COLORS[cat] }}
+                  />
+                  {cat}
+                </span>
+              ) : null,
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Controls: search + min schools */}
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="text-xs font-medium text-text-secondary">
+            Category
+          </label>
+          <select
+            value={categoryFilter}
+            onChange={(e) => handleCategoryChange(e.target.value)}
+            className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent"
+          >
+            <option value="">All</option>
+            {CIP_CATEGORY_ORDER.map((cat) => (
+              <option key={cat} value={cat}>
+                {cat}
+              </option>
+            ))}
+          </select>
           <label className="text-xs font-medium text-text-secondary">
             Min schools
           </label>
@@ -179,6 +352,7 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
         <table className="w-full text-left">
           <thead className="border-b border-gray-100 bg-gray-50/50">
             <tr>
+              <th className="px-3 py-2.5 text-right text-xs font-semibold text-text-secondary w-10">#</th>
               <SortableHeader<SortKey>
                 label="Major"
                 sortKey="cipTitle"
@@ -221,14 +395,17 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
             </tr>
           </thead>
           <tbody>
-            {paginated.map((m) => (
+            {paginated.map((m, i) => (
               <tr
                 key={m.cipCode}
-                onClick={() => router.push(`/majors/${encodeURIComponent(m.cipCode)}`)}
+                onClick={() => router.push(`/majors/${encodeURIComponent(m.cipCode)}?from=majors`)}
                 className="cursor-pointer border-b border-gray-50 transition-colors hover:bg-gray-50"
               >
+                <td className="px-3 py-2.5 text-right text-xs tabular-nums text-text-secondary w-10">
+                  {(currentPage - 1) * PAGE_SIZE + i + 1}
+                </td>
                 <td className="px-3 py-2.5 text-sm font-medium text-text-primary">
-                  {m.cipTitle}
+                  {m.cipTitle.replace(/\.+$/, '')}
                   <span className="ml-2 text-xs text-accent">&rarr;</span>
                 </td>
                 <td className="px-3 py-2.5 text-right text-sm tabular-nums text-text-primary">
@@ -254,7 +431,7 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
             {paginated.length === 0 && (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   className="px-3 py-8 text-center text-sm text-text-secondary"
                 >
                   No majors match your search

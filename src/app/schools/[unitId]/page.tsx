@@ -1,17 +1,43 @@
+import type { Metadata } from 'next';
 import { getDb } from '@/lib/db';
 import { programs, schools } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import type { School, ProgramRecord } from '@/types';
 import SchoolDetail from '@/components/SchoolDetail';
+import PageNav from '@/components/PageNav';
 
 export const dynamic = 'force-dynamic';
 
 interface PageProps {
   params: Promise<{ unitId: string }>;
+  searchParams: Promise<{ from?: string }>;
 }
 
-export default async function SchoolPage({ params }: PageProps) {
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { unitId: raw } = await params;
+  const unitId = parseInt(raw, 10);
+  if (isNaN(unitId)) return { title: 'Invalid School' };
+
+  const db = getDb();
+  const [row] = await db
+    .select({ name: schools.name, city: schools.city, state: schools.state })
+    .from(schools)
+    .where(eq(schools.unitId, unitId))
+    .limit(1);
+
+  if (!row) return { title: 'School Not Found' };
+
+  const description = `Explore earnings data for ${row.name} programs in ${row.city}, ${row.state}.`;
+  return {
+    title: row.name,
+    description,
+    openGraph: { title: `${row.name} - Education ROI`, description },
+  };
+}
+
+export default async function SchoolPage({ params, searchParams }: PageProps) {
+  const { unitId: raw } = await params;
+  const { from: fromTab } = await searchParams;
   const unitId = parseInt(raw, 10);
 
   if (isNaN(unitId)) {
@@ -80,6 +106,7 @@ export default async function SchoolPage({ params }: PageProps) {
       earn4yr: programs.earn4yr,
       earn5yr: programs.earn5yr,
       earn1yrCount: programs.earn1yrCount,
+      earn5yrCount: programs.earn5yrCount,
       costAttendance: programs.costAttendance,
       selectivityTier: programs.selectivityTier,
     })
@@ -99,6 +126,7 @@ export default async function SchoolPage({ params }: PageProps) {
     earn4yr: r.earn4yr,
     earn5yr: r.earn5yr,
     earn1yrCount: r.earn1yrCount,
+    earn5yrCount: r.earn5yrCount,
     costAttendance: r.costAttendance,
     selectivityTier: r.selectivityTier ?? '',
     ownership: school.ownership,
@@ -112,7 +140,8 @@ export default async function SchoolPage({ params }: PageProps) {
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-8 sm:py-12">
-      <SchoolDetail school={school} programs={programData} />
+      <PageNav />
+      <SchoolDetail school={school} programs={programData} fromTab={fromTab} />
     </main>
   );
 }

@@ -1,17 +1,43 @@
+import type { Metadata } from 'next';
 import { getDb } from '@/lib/db';
 import { programs, schools, majorsSummary } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import type { MajorSummary, ProgramRecord } from '@/types';
 import MajorDetail from '@/components/MajorDetail';
+import PageNav from '@/components/PageNav';
 
 export const dynamic = 'force-dynamic';
 
 interface PageProps {
   params: Promise<{ cipCode: string }>;
+  searchParams: Promise<{ from?: string }>;
 }
 
-export default async function MajorPage({ params }: PageProps) {
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { cipCode } = await params;
+  const db = getDb();
+  const [row] = await db
+    .select({ cipTitle: majorsSummary.cipTitle, medianEarn1yr: majorsSummary.medianEarn1yr })
+    .from(majorsSummary)
+    .where(eq(majorsSummary.cipCode, cipCode))
+    .limit(1);
+
+  if (!row) return { title: 'Major Not Found' };
+
+  const description = row.medianEarn1yr
+    ? `${row.cipTitle} graduates earn a median of $${Math.round(row.medianEarn1yr).toLocaleString()} in their first year.`
+    : `Explore earnings data for ${row.cipTitle} across all schools.`;
+
+  return {
+    title: row.cipTitle,
+    description,
+    openGraph: { title: `${row.cipTitle} - Education ROI`, description },
+  };
+}
+
+export default async function MajorPage({ params, searchParams }: PageProps) {
+  const { cipCode } = await params;
+  const { from: fromTab } = await searchParams;
   const db = getDb();
 
   // Fetch major summary
@@ -60,6 +86,7 @@ export default async function MajorPage({ params }: PageProps) {
       earn4yr: programs.earn4yr,
       earn5yr: programs.earn5yr,
       earn1yrCount: programs.earn1yrCount,
+      earn5yrCount: programs.earn5yrCount,
       costAttendance: programs.costAttendance,
       selectivityTier: programs.selectivityTier,
       ownership: schools.ownership,
@@ -87,6 +114,7 @@ export default async function MajorPage({ params }: PageProps) {
     earn4yr: r.earn4yr,
     earn5yr: r.earn5yr,
     earn1yrCount: r.earn1yrCount,
+    earn5yrCount: r.earn5yrCount,
     costAttendance: r.costAttendance,
     selectivityTier: r.selectivityTier ?? '',
     ownership: r.ownership,
@@ -100,7 +128,8 @@ export default async function MajorPage({ params }: PageProps) {
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-8 sm:py-12">
-      <MajorDetail major={major} programs={programData} />
+      <PageNav />
+      <MajorDetail major={major} programs={programData} fromTab={fromTab} />
     </main>
   );
 }

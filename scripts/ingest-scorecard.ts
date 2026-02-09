@@ -51,8 +51,11 @@ async function main() {
   });
   const db = drizzle(client, { schema });
 
-  // Create tables
+  // Drop and recreate tables to ensure schema is up to date
   console.log('\nCreating tables...');
+  await db.run(sql`DROP TABLE IF EXISTS programs`);
+  await db.run(sql`DROP TABLE IF EXISTS majors_summary`);
+  await db.run(sql`DROP TABLE IF EXISTS schools`);
   await db.run(sql`
     CREATE TABLE IF NOT EXISTS schools (
       unit_id INTEGER PRIMARY KEY,
@@ -90,6 +93,7 @@ async function main() {
       earn_4yr REAL,
       earn_5yr REAL,
       earn_1yr_count INTEGER,
+      earn_5yr_count INTEGER,
       cost_attendance REAL,
       selectivity_tier TEXT
     )
@@ -133,7 +137,7 @@ async function main() {
     unitId: number; schoolName: string; state: string;
     cipCode: string; cipTitle: string; credLevel: number; credTitle: string;
     earn1yr: number | null; earn4yr: number | null; earn5yr: number | null;
-    earn1yrCount: number | null; costAttendance: number | null;
+    earn1yrCount: number | null; earn5yrCount: number | null; costAttendance: number | null;
     selectivityTier: string;
   }
 
@@ -210,6 +214,7 @@ async function main() {
         earn4yr: p.earn4yr,
         earn5yr: p.earn5yr,
         earn1yrCount: p.earn1yrCount,
+        earn5yrCount: p.earn5yrCount,
         costAttendance: p.costAttendance,
         selectivityTier: p.selectivityTier,
       })),

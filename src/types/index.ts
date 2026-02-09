@@ -24,6 +24,7 @@ export interface ProgramRecord {
   earn4yr: number | null;
   earn5yr: number | null;
   earn1yrCount: number | null;
+  earn5yrCount: number | null;
   costAttendance: number | null;
   selectivityTier: string;
   ownership: number | null;
@@ -68,12 +69,14 @@ export interface SchoolRanking {
   satCombined: number | null;
   size: number | null;
   costAttendance: number | null;
+  netPrice: number | null;
   completionRate: number | null;
   selectivityTier: string;
   programCount: number;
   medianEarn1yr: number | null;
   weightedEarn1yr: number | null;
-  roi: number | null;
+  weightedEarn5yr: number | null;
+  paybackYears: number | null;
   maxEarn1yr: number | null;
   topProgram: string | null;
 }

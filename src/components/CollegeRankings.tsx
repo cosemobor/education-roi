@@ -2,29 +2,58 @@
 
 import { useState, useMemo, useCallback } from 'react';
 import Link from 'next/link';
+import {
+  ScatterChart, Scatter, XAxis, YAxis, Tooltip,
+  CartesianGrid, ResponsiveContainer,
+} from 'recharts';
 import type { SchoolRanking, SortDir } from '@/types';
-import { formatCurrency, formatRate, formatNumber } from '@/lib/formatters';
-import { getDisplayTier, TIER_COLORS } from '@/lib/tiers';
+import { formatCurrency, formatCompact, formatRate, formatNumber, formatPayback } from '@/lib/formatters';
+import { getDisplayTier, TIER_COLORS, TIER_ORDER } from '@/lib/tiers';
+import { trackEvent } from '@/lib/analytics';
 import StatCard from './StatCard';
+
+interface ScatterDatum {
+  x: number;
+  y: number;
+  unitId: number;
+  name: string;
+  state: string;
+  tier: string;
+  admitRate: number;
+  earnings: number;
+}
+
+function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: ScatterDatum }> }) {
+  if (!active || !payload?.[0]) return null;
+  const d = payload[0].payload;
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-lg">
+      <p className="text-sm font-semibold text-text-primary">{d.name}</p>
+      <p className="text-xs text-text-secondary">{d.state}</p>
+      <div className="mt-1.5 flex gap-4 text-xs">
+        <span>5yr Avg: <strong className="text-earn-above">{formatCurrency(d.earnings)}</strong></span>
+        <span>Admit: <strong>{formatRate(d.admitRate)}</strong></span>
+      </div>
+      <span
+        className="mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium text-white"
+        style={{ backgroundColor: TIER_COLORS[d.tier] ?? '#9ca3af' }}
+      >
+        {d.tier}
+      </span>
+    </div>
+  );
+}
 
 type SortField =
   | 'name'
   | 'weightedEarn1yr'
-  | 'roi'
+  | 'weightedEarn5yr'
+  | 'paybackYears'
   | 'programCount'
   | 'admissionRate'
   | 'costAttendance';
 
 const PAGE_SIZE = 25;
-
-const EARN_THRESHOLDS = [
-  { value: 0, label: 'All' },
-  { value: 40000, label: '$40k+' },
-  { value: 50000, label: '$50k+' },
-  { value: 60000, label: '$60k+' },
-  { value: 75000, label: '$75k+' },
-  { value: 100000, label: '$100k+' },
-];
 
 interface CollegeRankingsProps {
   schoolRankings: SchoolRanking[];
@@ -33,13 +62,12 @@ interface CollegeRankingsProps {
 export default function CollegeRankings({
   schoolRankings,
 }: CollegeRankingsProps) {
-  const [sortField, setSortField] = useState<SortField>('weightedEarn1yr');
+  const [sortField, setSortField] = useState<SortField>('weightedEarn5yr');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [ownershipFilter, setOwnershipFilter] = useState<number | null>(null);
   const [stateFilter, setStateFilter] = useState('');
-  const [earnThreshold, setEarnThreshold] = useState(0);
-  const [minPrograms, setMinPrograms] = useState(10);
+  const [minPrograms, setMinPrograms] = useState(5);
   const [page, setPage] = useState(1);
 
   const states = useMemo(() => {
@@ -50,11 +78,6 @@ export default function CollegeRankings({
   // Filter
   const filtered = useMemo(() => {
     let rows = schoolRankings.filter((r) => r.programCount >= minPrograms);
-    if (earnThreshold > 0) {
-      rows = rows.filter(
-        (r) => r.weightedEarn1yr != null && r.weightedEarn1yr >= earnThreshold,
-      );
-    }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       rows = rows.filter((r) => r.name.toLowerCase().includes(q));
@@ -66,7 +89,7 @@ export default function CollegeRankings({
       rows = rows.filter((r) => r.state === stateFilter);
     }
     return rows;
-  }, [schoolRankings, searchQuery, ownershipFilter, stateFilter, earnThreshold, minPrograms]);
+  }, [schoolRankings, searchQuery, ownershipFilter, stateFilter, minPrograms]);
 
   // Sort
   const sorted = useMemo(() => {
@@ -96,16 +119,14 @@ export default function CollegeRankings({
   );
 
   const handleSort = useCallback((field: SortField) => {
-    setSortField((prev) => {
-      if (prev === field) {
-        setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-        return prev;
-      }
-      setSortDir(field === 'name' ? 'asc' : 'desc');
-      return field;
-    });
+    if (field === sortField) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDir(field === 'name' || field === 'paybackYears' ? 'asc' : 'desc');
+    }
     setPage(1);
-  }, []);
+  }, [sortField]);
 
   const sortArrow = (field: SortField) => {
     if (sortField !== field) return ' \u21D5';
@@ -129,27 +150,67 @@ export default function CollegeRankings({
 
   // Stats
   const stats = useMemo(() => {
-    const withEarn = filtered.filter((r) => r.weightedEarn1yr != null);
+    const withEarn = filtered.filter((r) => r.weightedEarn5yr != null);
     const highest = withEarn.length
       ? withEarn.reduce((best, r) =>
-          (r.weightedEarn1yr ?? 0) > (best.weightedEarn1yr ?? 0) ? r : best,
+          (r.weightedEarn5yr ?? 0) > (best.weightedEarn5yr ?? 0) ? r : best,
           withEarn[0],
         )
       : null;
-    const bestRoi = withEarn.length
-      ? withEarn.reduce((best, r) =>
-          (r.roi ?? 0) > (best.roi ?? 0) ? r : best,
-          withEarn[0],
+    const withPayback = filtered.filter((r) => r.paybackYears != null);
+    const fastestPayback = withPayback.length
+      ? withPayback.reduce((best, r) =>
+          (r.paybackYears ?? Infinity) < (best.paybackYears ?? Infinity) ? r : best,
+          withPayback[0],
         )
       : null;
-    return { total: filtered.length, highest, bestRoi };
+    return { total: filtered.length, highest, fastestPayback };
   }, [filtered]);
+
+  // Scatter chart data
+  const { tierData, xDomain, yDomain } = useMemo(() => {
+    const groups: Record<string, ScatterDatum[]> = {};
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const r of filtered) {
+      if (r.admissionRate == null || r.weightedEarn5yr == null) continue;
+      const tier = getDisplayTier(r.name, r.selectivityTier);
+      if (!groups[tier]) groups[tier] = [];
+      groups[tier].push({
+        x: r.admissionRate,
+        y: r.weightedEarn5yr,
+        unitId: r.unitId,
+        name: r.name,
+        state: r.state,
+        tier,
+        admitRate: r.admissionRate,
+        earnings: r.weightedEarn5yr,
+      });
+      if (r.admissionRate < minX) minX = r.admissionRate;
+      if (r.admissionRate > maxX) maxX = r.admissionRate;
+      if (r.weightedEarn5yr < minY) minY = r.weightedEarn5yr;
+      if (r.weightedEarn5yr > maxY) maxY = r.weightedEarn5yr;
+    }
+    const xPad = (maxX - minX) * 0.05 || 0.05;
+    const yPad = (maxY - minY) * 0.1 || 5000;
+    return {
+      tierData: groups,
+      xDomain: [Math.max(0, minX - xPad), Math.min(1, maxX + xPad)] as [number, number],
+      yDomain: [Math.max(0, minY - yPad), maxY + yPad] as [number, number],
+    };
+  }, [filtered]);
+
+  const handleDotClick = useCallback((data: any) => {
+    const uid = data?.unitId ?? data?.payload?.unitId;
+    if (uid != null) {
+      trackEvent('school_click', { unitId: uid });
+      window.location.href = `/schools/${uid}?from=colleges`;
+    }
+  }, []);
 
   const filtersActive = !!(
     searchQuery ||
     ownershipFilter != null ||
-    stateFilter ||
-    earnThreshold > 0
+    stateFilter
   );
 
   return (
@@ -161,20 +222,61 @@ export default function CollegeRankings({
           label="Highest Earning College"
           value={
             stats.highest
-              ? formatCurrency(stats.highest.weightedEarn1yr)
+              ? formatCurrency(stats.highest.weightedEarn5yr)
               : '\u2014'
           }
           detail={stats.highest?.name}
         />
         <StatCard
-          label="Best ROI"
-          value={
-            stats.bestRoi?.roi != null
-              ? stats.bestRoi.roi.toFixed(1) + 'x'
-              : '\u2014'
-          }
-          detail={stats.bestRoi?.name}
+          label="Fastest Payback"
+          value={formatPayback(stats.fastestPayback?.paybackYears ?? null)}
+          detail={stats.fastestPayback?.name}
         />
+      </div>
+
+      {/* Scatter chart */}
+      <div
+        className="mb-6 rounded-lg border border-gray-100 bg-white p-2 shadow-sm sm:p-4"
+        style={{ userSelect: 'none', WebkitTapHighlightColor: 'transparent' }}
+        onMouseDown={(e) => {
+          if ((e.target as HTMLElement).closest?.('svg')) e.preventDefault();
+        }}
+      >
+        <ResponsiveContainer width="100%" height={420}>
+          <ScatterChart margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+            <XAxis
+              dataKey="x"
+              type="number"
+              domain={xDomain}
+              tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`}
+              tick={{ fontSize: 11, fill: '#6b7280' }}
+              label={{ value: 'Admission Rate', position: 'insideBottom', offset: -10, fontSize: 12, fill: '#6b7280' }}
+            />
+            <YAxis
+              dataKey="y"
+              type="number"
+              domain={yDomain}
+              tickFormatter={(v: number) => formatCompact(v)}
+              tick={{ fontSize: 11, fill: '#6b7280' }}
+              width={60}
+              label={{ value: 'Avg 5yr Earnings', angle: -90, position: 'insideLeft', offset: 5, fontSize: 12, fill: '#6b7280' }}
+            />
+            <Tooltip content={<ChartTooltip />} cursor={false} />
+            {TIER_ORDER.map(
+              (tier) =>
+                tierData[tier] && (
+                  <Scatter
+                    key={tier}
+                    name={tier}
+                    data={tierData[tier]}
+                    fill={TIER_COLORS[tier]}
+                    onClick={handleDotClick}
+                  />
+                ),
+            )}
+          </ScatterChart>
+        </ResponsiveContainer>
       </div>
 
       {/* Filters */}
@@ -220,30 +322,6 @@ export default function CollegeRankings({
               </option>
             ))}
           </select>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-text-secondary">
-            Min Median Earnings
-          </label>
-          <div className="flex rounded-lg border border-gray-200 bg-white text-xs">
-            {EARN_THRESHOLDS.map(({ value, label }) => (
-              <button
-                key={value}
-                onClick={() => {
-                  setEarnThreshold(value);
-                  setPage(1);
-                }}
-                className={`px-2 py-1.5 transition-colors first:rounded-l-lg last:rounded-r-lg ${
-                  earnThreshold === value
-                    ? 'bg-accent text-white'
-                    : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
         </div>
 
         <div>
@@ -306,7 +384,6 @@ export default function CollegeRankings({
               setSearchQuery('');
               setOwnershipFilter(null);
               setStateFilter('');
-              setEarnThreshold(0);
               setPage(1);
             }}
             className="rounded-lg px-2 py-1.5 text-xs text-accent hover:bg-accent/10"
@@ -337,15 +414,21 @@ export default function CollegeRankings({
               </th>
               <th
                 className="cursor-pointer px-3 py-2 text-right text-xs font-medium text-text-secondary hover:text-text-primary"
+                onClick={() => handleSort('weightedEarn5yr')}
+              >
+                Avg 5yr{sortArrow('weightedEarn5yr')}
+              </th>
+              <th
+                className="hidden cursor-pointer px-3 py-2 text-right text-xs font-medium text-text-secondary hover:text-text-primary sm:table-cell"
                 onClick={() => handleSort('weightedEarn1yr')}
               >
                 Avg 1yr{sortArrow('weightedEarn1yr')}
               </th>
               <th
                 className="cursor-pointer px-3 py-2 text-right text-xs font-medium text-text-secondary hover:text-text-primary"
-                onClick={() => handleSort('roi')}
+                onClick={() => handleSort('paybackYears')}
               >
-                ROI{sortArrow('roi')}
+                Payback{sortArrow('paybackYears')}
               </th>
               <th className="hidden px-3 py-2 text-xs font-medium text-text-secondary sm:table-cell">
                 Top Program
@@ -391,7 +474,7 @@ export default function CollegeRankings({
                         }}
                       />
                       <Link
-                        href={`/schools/${r.unitId}`}
+                        href={`/schools/${r.unitId}?from=colleges`}
                         className="text-sm font-medium text-accent hover:underline"
                       >
                         {r.name}
@@ -402,10 +485,13 @@ export default function CollegeRankings({
                     </span>
                   </td>
                   <td className="px-3 py-2.5 text-right text-sm tabular-nums font-medium text-earn-above">
+                    {formatCurrency(r.weightedEarn5yr)}
+                  </td>
+                  <td className="hidden px-3 py-2.5 text-right text-sm tabular-nums text-text-secondary sm:table-cell">
                     {formatCurrency(r.weightedEarn1yr)}
                   </td>
                   <td className="px-3 py-2.5 text-right text-sm tabular-nums font-semibold text-text-primary">
-                    {r.roi != null ? r.roi.toFixed(1) + 'x' : '\u2014'}
+                    {formatPayback(r.paybackYears)}
                   </td>
                   <td className="hidden max-w-[200px] truncate px-3 py-2.5 text-xs text-text-secondary sm:table-cell">
                     {r.topProgram ?? '\u2014'}
@@ -425,7 +511,7 @@ export default function CollegeRankings({
             {paginated.length === 0 && (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={9}
                   className="px-3 py-8 text-center text-sm text-text-secondary"
                 >
                   No colleges match your filters

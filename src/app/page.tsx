@@ -43,6 +43,8 @@ export default async function Home() {
       satRead75: schools.satRead75,
       size: schools.size,
       costAttendance: schools.costAttendance,
+      netPricePublic: schools.netPricePublic,
+      netPricePrivate: schools.netPricePrivate,
       completionRate: schools.completionRate,
       selectivityTier: schools.selectivityTier,
       programCount: sql<number>`count(${programs.id})`.as('program_count'),
@@ -62,22 +64,29 @@ export default async function Home() {
       cipTitle: programs.cipTitle,
       earn1yr: programs.earn1yr,
       earn1yrCount: programs.earn1yrCount,
+      earn5yr: programs.earn5yr,
+      earn5yrCount: programs.earn5yrCount,
     })
     .from(programs)
-    .where(isNotNull(programs.earn1yr))
     .orderBy(desc(programs.earn1yr));
 
   // Build maps per school
   const topProgramMap = new Map<number, string>();
-  const earnBySchool = new Map<number, { earn: number; count: number }[]>();
+  const earn1yrBySchool = new Map<number, { earn: number; count: number }[]>();
+  const earn5yrBySchool = new Map<number, { earn: number; count: number }[]>();
   for (const row of programRows) {
-    if (!topProgramMap.has(row.unitId)) {
+    if (!topProgramMap.has(row.unitId) && row.earn1yr != null) {
       topProgramMap.set(row.unitId, row.cipTitle ?? '');
     }
     if (row.earn1yr != null) {
-      const arr = earnBySchool.get(row.unitId) ?? [];
+      const arr = earn1yrBySchool.get(row.unitId) ?? [];
       arr.push({ earn: row.earn1yr, count: row.earn1yrCount ?? 1 });
-      earnBySchool.set(row.unitId, arr);
+      earn1yrBySchool.set(row.unitId, arr);
+    }
+    if (row.earn5yr != null) {
+      const arr = earn5yrBySchool.get(row.unitId) ?? [];
+      arr.push({ earn: row.earn5yr, count: row.earn5yrCount ?? 1 });
+      earn5yrBySchool.set(row.unitId, arr);
     }
   }
 
@@ -100,10 +109,21 @@ export default async function Home() {
   }
 
   const schoolRankings: SchoolRanking[] = schoolRows.map((r) => {
-    const items = earnBySchool.get(r.unitId);
+    const items = earn1yrBySchool.get(r.unitId);
+    const items5yr = earn5yrBySchool.get(r.unitId);
     const medianVal = items ? median(items.map((i) => i.earn)) : r.avgEarn1yr;
     const weighted = items ? weightedAvg(items) : null;
+    const weighted5yr = items5yr ? weightedAvg(items5yr) : null;
     const cost = r.costAttendance;
+    const netPrice =
+      (r.ownership ?? 0) === 1
+        ? (r.netPricePublic ?? cost)
+        : (r.netPricePrivate ?? cost);
+    const totalCost = netPrice != null ? netPrice * 4 : null;
+    const paybackYears =
+      weighted != null && totalCost != null && weighted > 0
+        ? totalCost / weighted
+        : null;
     return {
       unitId: r.unitId,
       name: r.name,
@@ -118,12 +138,14 @@ export default async function Home() {
           : null,
       size: r.size,
       costAttendance: cost,
+      netPrice,
       completionRate: r.completionRate,
       selectivityTier: r.selectivityTier ?? '',
       programCount: r.programCount,
       medianEarn1yr: medianVal,
       weightedEarn1yr: weighted,
-      roi: weighted != null && cost != null && cost > 0 ? weighted / cost : null,
+      weightedEarn5yr: weighted5yr,
+      paybackYears,
       maxEarn1yr: r.maxEarn1yr,
       topProgram: topProgramMap.get(r.unitId) ?? null,
     };

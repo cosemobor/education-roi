@@ -38,6 +38,7 @@ export const programs = sqliteTable('programs', {
   earn4yr: real('earn_4yr'),
   earn5yr: real('earn_5yr'),
   earn1yrCount: integer('earn_1yr_count'),
+  earn5yrCount: integer('earn_5yr_count'),
   costAttendance: real('cost_attendance'),
   selectivityTier: text('selectivity_tier'),
 }, (table) => [
