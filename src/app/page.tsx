@@ -55,45 +55,55 @@ export default async function Home() {
     .groupBy(schools.unitId)
     .orderBy(desc(sql`avg(${programs.earn1yr})`));
 
-  // For each school, find the top program name
-  const topProgramRows = await db
+  // For each school, find the top program and collect earnings data
+  const programRows = await db
     .select({
       unitId: programs.unitId,
       cipTitle: programs.cipTitle,
       earn1yr: programs.earn1yr,
+      earn1yrCount: programs.earn1yrCount,
     })
     .from(programs)
     .where(isNotNull(programs.earn1yr))
     .orderBy(desc(programs.earn1yr));
 
-  // Build a map: unitId -> top program title
+  // Build maps per school
   const topProgramMap = new Map<number, string>();
-  for (const row of topProgramRows) {
+  const earnBySchool = new Map<number, { earn: number; count: number }[]>();
+  for (const row of programRows) {
     if (!topProgramMap.has(row.unitId)) {
       topProgramMap.set(row.unitId, row.cipTitle ?? '');
     }
-  }
-
-  // Compute median per school: collect all earn1yr per school, find the middle
-  const earnBySchool = new Map<number, number[]>();
-  for (const row of topProgramRows) {
     if (row.earn1yr != null) {
       const arr = earnBySchool.get(row.unitId) ?? [];
-      arr.push(row.earn1yr);
+      arr.push({ earn: row.earn1yr, count: row.earn1yrCount ?? 1 });
       earnBySchool.set(row.unitId, arr);
     }
   }
 
-  function median(arr: number[]): number {
-    const sorted = [...arr].sort((a, b) => a - b);
+  function median(values: number[]): number {
+    const sorted = [...values].sort((a, b) => a - b);
     const mid = Math.floor(sorted.length / 2);
     return sorted.length % 2 !== 0
       ? sorted[mid]
       : (sorted[mid - 1] + sorted[mid]) / 2;
   }
 
+  function weightedAvg(items: { earn: number; count: number }[]): number | null {
+    let totalWeight = 0;
+    let weightedSum = 0;
+    for (const { earn, count } of items) {
+      weightedSum += earn * count;
+      totalWeight += count;
+    }
+    return totalWeight > 0 ? weightedSum / totalWeight : null;
+  }
+
   const schoolRankings: SchoolRanking[] = schoolRows.map((r) => {
-    const earns = earnBySchool.get(r.unitId);
+    const items = earnBySchool.get(r.unitId);
+    const medianVal = items ? median(items.map((i) => i.earn)) : r.avgEarn1yr;
+    const weighted = items ? weightedAvg(items) : null;
+    const cost = r.costAttendance;
     return {
       unitId: r.unitId,
       name: r.name,
@@ -107,11 +117,13 @@ export default async function Home() {
           ? r.satMath75 + r.satRead75
           : null,
       size: r.size,
-      costAttendance: r.costAttendance,
+      costAttendance: cost,
       completionRate: r.completionRate,
       selectivityTier: r.selectivityTier ?? '',
       programCount: r.programCount,
-      medianEarn1yr: earns ? median(earns) : r.avgEarn1yr,
+      medianEarn1yr: medianVal,
+      weightedEarn1yr: weighted,
+      roi: weighted != null && cost != null && cost > 0 ? weighted / cost : null,
       maxEarn1yr: r.maxEarn1yr,
       topProgram: topProgramMap.get(r.unitId) ?? null,
     };

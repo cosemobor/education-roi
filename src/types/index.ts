@@ -72,6 +72,8 @@ export interface SchoolRanking {
   selectivityTier: string;
   programCount: number;
   medianEarn1yr: number | null;
+  weightedEarn1yr: number | null;
+  roi: number | null;
   maxEarn1yr: number | null;
   topProgram: string | null;
 }

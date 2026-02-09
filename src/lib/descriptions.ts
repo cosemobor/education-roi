@@ -25,6 +25,10 @@ export function generateMajorDescription(major: MajorSummary): string {
     );
   }
 
+  parts.push(
+    'Earnings data is sourced from the U.S. Department of Education College Scorecard, reflecting median earnings of graduates one and five years after completion.',
+  );
+
   return parts.join(' ');
 }
 
@@ -75,6 +79,10 @@ export function generateSchoolDescription(
       );
     }
   }
+
+  parts.push(
+    'Earnings are weighted by the number of graduates reporting in each program to reflect the typical student outcome. ROI represents first-year earnings relative to cost of attendance.',
+  );
 
   return parts.join(' ');
 }

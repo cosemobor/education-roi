@@ -9,7 +9,8 @@ import StatCard from './StatCard';
 
 type SortField =
   | 'name'
-  | 'medianEarn1yr'
+  | 'weightedEarn1yr'
+  | 'roi'
   | 'programCount'
   | 'admissionRate'
   | 'costAttendance';
@@ -32,13 +33,13 @@ interface CollegeRankingsProps {
 export default function CollegeRankings({
   schoolRankings,
 }: CollegeRankingsProps) {
-  const [sortField, setSortField] = useState<SortField>('medianEarn1yr');
+  const [sortField, setSortField] = useState<SortField>('weightedEarn1yr');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [ownershipFilter, setOwnershipFilter] = useState<number | null>(null);
   const [stateFilter, setStateFilter] = useState('');
   const [earnThreshold, setEarnThreshold] = useState(0);
-  const [minPrograms, setMinPrograms] = useState(5);
+  const [minPrograms, setMinPrograms] = useState(10);
   const [page, setPage] = useState(1);
 
   const states = useMemo(() => {
@@ -51,7 +52,7 @@ export default function CollegeRankings({
     let rows = schoolRankings.filter((r) => r.programCount >= minPrograms);
     if (earnThreshold > 0) {
       rows = rows.filter(
-        (r) => r.medianEarn1yr != null && r.medianEarn1yr >= earnThreshold,
+        (r) => r.weightedEarn1yr != null && r.weightedEarn1yr >= earnThreshold,
       );
     }
     if (searchQuery.trim()) {
@@ -128,14 +129,20 @@ export default function CollegeRankings({
 
   // Stats
   const stats = useMemo(() => {
-    const withEarn = filtered.filter((r) => r.medianEarn1yr != null);
+    const withEarn = filtered.filter((r) => r.weightedEarn1yr != null);
     const highest = withEarn.length
       ? withEarn.reduce((best, r) =>
-          (r.medianEarn1yr ?? 0) > (best.medianEarn1yr ?? 0) ? r : best,
+          (r.weightedEarn1yr ?? 0) > (best.weightedEarn1yr ?? 0) ? r : best,
           withEarn[0],
         )
       : null;
-    return { total: filtered.length, highest };
+    const bestRoi = withEarn.length
+      ? withEarn.reduce((best, r) =>
+          (r.roi ?? 0) > (best.roi ?? 0) ? r : best,
+          withEarn[0],
+        )
+      : null;
+    return { total: filtered.length, highest, bestRoi };
   }, [filtered]);
 
   const filtersActive = !!(
@@ -154,21 +161,19 @@ export default function CollegeRankings({
           label="Highest Earning College"
           value={
             stats.highest
-              ? formatCurrency(stats.highest.medianEarn1yr)
+              ? formatCurrency(stats.highest.weightedEarn1yr)
               : '\u2014'
           }
           detail={stats.highest?.name}
         />
         <StatCard
-          label="Top Program"
+          label="Best ROI"
           value={
-            stats.highest?.topProgram ?? '\u2014'
+            stats.bestRoi?.roi != null
+              ? stats.bestRoi.roi.toFixed(1) + 'x'
+              : '\u2014'
           }
-          detail={
-            stats.highest
-              ? `${stats.highest.name} \u2014 ${formatCurrency(stats.highest.maxEarn1yr)}`
-              : undefined
-          }
+          detail={stats.bestRoi?.name}
         />
       </div>
 
@@ -332,9 +337,15 @@ export default function CollegeRankings({
               </th>
               <th
                 className="cursor-pointer px-3 py-2 text-right text-xs font-medium text-text-secondary hover:text-text-primary"
-                onClick={() => handleSort('medianEarn1yr')}
+                onClick={() => handleSort('weightedEarn1yr')}
               >
-                Median 1yr{sortArrow('medianEarn1yr')}
+                Avg 1yr{sortArrow('weightedEarn1yr')}
+              </th>
+              <th
+                className="cursor-pointer px-3 py-2 text-right text-xs font-medium text-text-secondary hover:text-text-primary"
+                onClick={() => handleSort('roi')}
+              >
+                ROI{sortArrow('roi')}
               </th>
               <th className="hidden px-3 py-2 text-xs font-medium text-text-secondary sm:table-cell">
                 Top Program
@@ -391,7 +402,10 @@ export default function CollegeRankings({
                     </span>
                   </td>
                   <td className="px-3 py-2.5 text-right text-sm tabular-nums font-medium text-earn-above">
-                    {formatCurrency(r.medianEarn1yr)}
+                    {formatCurrency(r.weightedEarn1yr)}
+                  </td>
+                  <td className="px-3 py-2.5 text-right text-sm tabular-nums font-semibold text-text-primary">
+                    {r.roi != null ? r.roi.toFixed(1) + 'x' : '\u2014'}
                   </td>
                   <td className="hidden max-w-[200px] truncate px-3 py-2.5 text-xs text-text-secondary sm:table-cell">
                     {r.topProgram ?? '\u2014'}
@@ -411,7 +425,7 @@ export default function CollegeRankings({
             {paginated.length === 0 && (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="px-3 py-8 text-center text-sm text-text-secondary"
                 >
                   No colleges match your filters
