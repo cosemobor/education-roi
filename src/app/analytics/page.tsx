@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { getDb } from '@/lib/db';
 import { analyticsEvents } from '@/lib/db/schema';
-import { sql, eq, desc, countDistinct, count } from 'drizzle-orm';
+import { sql, countDistinct, count } from 'drizzle-orm';
 import PageNav from '@/components/PageNav';
 import StatCard from '@/components/StatCard';
 
@@ -25,8 +25,20 @@ interface CountRow {
   cnt: number;
 }
 
-export default async function AnalyticsPage() {
+async function queryAnalytics() {
   const db = getDb();
+
+  // Ensure the analytics_events table exists
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS analytics_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      event_data TEXT,
+      page TEXT,
+      timestamp INTEGER NOT NULL
+    )
+  `);
 
   const [
     overviewRows,
@@ -44,16 +56,16 @@ export default async function AnalyticsPage() {
       })
       .from(analyticsEvents),
 
-    // Daily traffic (last 30 days)
+    // Daily traffic (last 30 days) — timestamp is stored as unix epoch integer
     db.all<DailyRow>(sql`
       SELECT
-        DATE(timestamp) as day,
+        DATE(timestamp, 'unixepoch') as day,
         COUNT(DISTINCT session_id) as sessions,
         COUNT(*) as events,
         SUM(CASE WHEN event_type = 'page_view' THEN 1 ELSE 0 END) as "pageViews",
         SUM(CASE WHEN event_type = 'search_query' THEN 1 ELSE 0 END) as searches
       FROM analytics_events
-      WHERE timestamp >= DATE('now', '-30 days')
+      WHERE timestamp >= CAST(strftime('%s', 'now', '-30 days') AS INTEGER)
       GROUP BY day
       ORDER BY day DESC
     `),
@@ -73,6 +85,7 @@ export default async function AnalyticsPage() {
       SELECT JSON_EXTRACT(event_data, '$.query') as label, COUNT(*) as cnt
       FROM analytics_events
       WHERE event_type = 'search_query' AND event_data IS NOT NULL
+        AND JSON_EXTRACT(event_data, '$.query') IS NOT NULL
       GROUP BY label
       ORDER BY cnt DESC
       LIMIT 20
@@ -98,6 +111,33 @@ export default async function AnalyticsPage() {
     `),
   ]);
 
+  return { overviewRows, dailyRows, topPagesRows, topSearchRows, eventBreakdownRows, topClickedRows };
+}
+
+export default async function AnalyticsPage() {
+  let data: Awaited<ReturnType<typeof queryAnalytics>> | null = null;
+  let error: string | null = null;
+
+  try {
+    data = await queryAnalytics();
+  } catch (e) {
+    error = e instanceof Error ? e.message : 'Unknown error loading analytics';
+  }
+
+  if (error || !data) {
+    return (
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:py-12">
+        <PageNav />
+        <h1 className="text-2xl font-bold text-text-primary sm:text-3xl">Analytics</h1>
+        <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-6">
+          <p className="text-sm font-medium text-red-800">Failed to load analytics data</p>
+          <p className="mt-1 text-xs text-red-600">{error}</p>
+        </div>
+      </main>
+    );
+  }
+
+  const { overviewRows, dailyRows, topPagesRows, topSearchRows, eventBreakdownRows, topClickedRows } = data;
   const overview = overviewRows[0] ?? { totalSessions: 0, totalEvents: 0 };
 
   // Count page views and searches from the breakdown
