@@ -60,13 +60,14 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
   const [sortKey, setSortKey] = useState<SortKey>('medianEarn1yr');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [minSchools, setMinSchools] = useState(10);
-  const [categoryFilter, setCategoryFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
   const [compareSet, setCompareSet] = useState<Set<string>>(new Set());
   const [chartEarnings, setChartEarnings] = useState<'earn1yr' | 'earn5yr'>('earn1yr');
   const [selectedMajor, setSelectedMajor] = useState<string | null>(null);
   const chartRef = useRef<HTMLDivElement>(null);
+  const dotClickedRef = useRef(false);
 
   // Close detail card on Escape
   useEffect(() => {
@@ -90,8 +91,8 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
   // Filter only (no sort) — chart + stats depend on this
   const filtered = useMemo(() => {
     let arr = majorsSummary.filter((m) => m.schoolCount >= minSchools);
-    if (categoryFilter) {
-      arr = arr.filter((m) => getCipCategory(m.cipCode) === categoryFilter);
+    if (categoryFilter.size > 0) {
+      arr = arr.filter((m) => categoryFilter.has(getCipCategory(m.cipCode)));
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -174,7 +175,7 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
 
   // Scatter chart: always show all qualifying data; dim non-matching points
   const earningsField = chartEarnings === 'earn1yr' ? 'medianEarn1yr' : 'medianEarn5yr';
-  const hasActiveFilter = !!(searchQuery.trim() || categoryFilter || compareSet.size > 0);
+  const hasActiveFilter = !!(searchQuery.trim() || categoryFilter.size > 0 || compareSet.size > 0);
 
   // Base chart data: minSchools filter only (axes stay stable)
   const { allChartData, xDomain, yDomain } = useMemo(() => {
@@ -243,6 +244,7 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
   const handleDotClick = useCallback((data: any) => {
     const code = data?.cipCode ?? data?.payload?.cipCode;
     if (code != null) {
+      dotClickedRef.current = true;
       trackEvent('major_click', { cipCode: code });
       setSelectedMajor((prev) => (prev === code ? null : code));
     }
@@ -289,8 +291,13 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
     setPage(1);
   }, []);
 
-  const handleCategoryChange = useCallback((value: string) => {
-    setCategoryFilter(value);
+  const handleCategoryToggle = useCallback((cat: string) => {
+    setCategoryFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
     setPage(1);
   }, []);
 
@@ -335,6 +342,10 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
           style={{ userSelect: 'none', WebkitTapHighlightColor: 'transparent' }}
           onMouseDown={(e) => {
             if ((e.target as HTMLElement).closest?.('svg')) e.preventDefault();
+          }}
+          onClick={(e) => {
+            if (dotClickedRef.current) { dotClickedRef.current = false; return; }
+            if ((e.target as HTMLElement).closest?.('svg')) setSelectedMajor(null);
           }}
         >
           <div className="mb-2 flex items-center justify-between px-2">
@@ -600,18 +611,29 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
           <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-text-secondary">
             Category
           </label>
-          <select
-            value={categoryFilter}
-            onChange={(e) => handleCategoryChange(e.target.value)}
-            className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent"
-          >
-            <option value="">All Categories</option>
+          <div className="flex flex-wrap gap-1">
             {CIP_CATEGORY_ORDER.map((cat) => (
-              <option key={cat} value={cat}>
+              <button
+                key={cat}
+                onClick={() => handleCategoryToggle(cat)}
+                className={`rounded-full px-2.5 py-1 text-xs transition-colors ${
+                  categoryFilter.has(cat)
+                    ? 'bg-accent text-white'
+                    : 'border border-gray-200 bg-white text-text-secondary hover:text-text-primary'
+                }`}
+              >
                 {cat}
-              </option>
+              </button>
             ))}
-          </select>
+            {categoryFilter.size > 0 && (
+              <button
+                onClick={() => { setCategoryFilter(new Set()); setPage(1); }}
+                className="rounded-full px-2 py-1 text-xs text-accent hover:bg-accent/10"
+              >
+                Clear
+              </button>
+            )}
+          </div>
         </div>
 
         <div>
@@ -631,11 +653,12 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
           </select>
         </div>
 
-        {(searchQuery || categoryFilter) && (
+        {(searchQuery || categoryFilter.size > 0) && (
           <button
             onClick={() => {
               handleSearchChange('');
-              handleCategoryChange('');
+              setCategoryFilter(new Set());
+              setPage(1);
             }}
             className="rounded-lg px-2 py-1.5 text-xs text-accent hover:bg-accent/10"
           >

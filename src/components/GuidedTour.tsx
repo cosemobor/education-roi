@@ -103,6 +103,7 @@ export default function GuidedTour({ restartKey = 0 }: GuidedTourProps) {
   const [step, setStep] = useState(-1);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const prevRestartKey = useRef(restartKey);
+  const [isMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640);
 
   // Auto-start on first visit
   useEffect(() => {
@@ -128,21 +129,21 @@ export default function GuidedTour({ restartKey = 0 }: GuidedTourProps) {
     const target = document.querySelector(`[data-tour="${STEPS[step].target}"]`);
     if (!target) return;
 
-    // Scroll into view if needed
-    target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // Scroll into view — use instant on mobile to avoid slow smooth scroll
+    target.scrollIntoView({ behavior: isMobile ? 'instant' : 'smooth', block: 'nearest' });
 
-    // Small delay to let scroll settle before measuring
+    // Measure position after scroll settles
     const raf = requestAnimationFrame(() => {
       setRect(target.getBoundingClientRect());
     });
     return () => cancelAnimationFrame(raf);
-  }, [step]);
+  }, [step, isMobile]);
 
   useEffect(() => {
     if (step < 0) return;
 
     // Initial position after a brief delay for scroll
-    const timer = setTimeout(updatePosition, 100);
+    const timer = setTimeout(updatePosition, isMobile ? 20 : 100);
 
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
@@ -203,7 +204,7 @@ export default function GuidedTour({ restartKey = 0 }: GuidedTourProps) {
             '0 0 0 4px rgba(37, 99, 235, 0.4), 0 0 0 9999px rgba(0, 0, 0, 0.5)',
           zIndex: 10000,
           pointerEvents: 'none',
-          transition: 'all 0.3s ease',
+          transition: isMobile ? 'all 0.15s ease' : 'all 0.3s ease',
         }}
       />
 

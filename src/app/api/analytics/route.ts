@@ -16,6 +16,9 @@ const VALID_EVENT_TYPES = new Set([
   'program_click',
   'tour_complete',
   'tour_skip',
+  'newsletter_signup',
+  'newsletter_dismiss',
+  'newsletter_banner_click',
 ]);
 
 export async function POST(request: NextRequest) {

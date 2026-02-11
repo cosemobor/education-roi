@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import PageTracker from "@/components/PageTracker";
+import NewsletterSignup from "@/components/NewsletterSignup";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -63,6 +64,7 @@ export default function RootLayout({
       >
         <Suspense fallback={null}>
           <PageTracker />
+          <NewsletterSignup />
         </Suspense>
         {children}
       </body>

@@ -92,12 +92,13 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
   const [searchQuery, setSearchQuery] = useState('');
   const [ownershipFilter, setOwnershipFilter] = useState<number | null>(null);
   const [stateFilter, setStateFilter] = useState('');
-  const [tierFilter, setTierFilter] = useState('');
+  const [tierFilter, setTierFilter] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
   const [earningsKey, setEarningsKey] = useState<EarningsKey>('earn1yr');
   const [selectedSchool, setSelectedSchool] = useState<number | null>(null);
   const [compareSet, setCompareSet] = useState<Set<number>>(new Set());
   const chartRef = useRef<HTMLDivElement>(null);
+  const dotClickedRef = useRef(false);
 
   // Close detail card on Escape
   useEffect(() => {
@@ -157,8 +158,8 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
     if (stateFilter) {
       rows = rows.filter((r) => r.state === stateFilter);
     }
-    if (tierFilter) {
-      rows = rows.filter((r) => r.tier === tierFilter);
+    if (tierFilter.size > 0) {
+      rows = rows.filter((r) => tierFilter.has(r.tier));
     }
     return rows;
   }, [allRows, searchQuery, ownershipFilter, stateFilter, tierFilter, programs]);
@@ -204,7 +205,7 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
   }, [allRows, earningsKey]);
 
   // Dim/highlight: when filters active, dim non-matching points
-  const hasActiveFilter = !!(searchQuery.trim() || ownershipFilter != null || stateFilter || tierFilter || compareSet.size > 0);
+  const hasActiveFilter = !!(searchQuery.trim() || ownershipFilter != null || stateFilter || tierFilter.size > 0 || compareSet.size > 0);
 
   const { dimmedData, highlightedByTier } = useMemo(() => {
     if (!hasActiveFilter) {
@@ -240,6 +241,7 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
   const handleDotClick = useCallback((data: any) => {
     const uid = data?.unitId ?? data?.payload?.unitId;
     if (uid != null) {
+      dotClickedRef.current = true;
       setSelectedSchool((prev) => (prev === uid ? null : uid));
     }
   }, []);
@@ -357,7 +359,7 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
     return pages;
   }, [currentPage, totalPages]);
 
-  const filtersActive = !!(searchQuery || ownershipFilter != null || stateFilter || tierFilter);
+  const filtersActive = !!(searchQuery || ownershipFilter != null || stateFilter || tierFilter.size > 0);
 
   return (
     <div>
@@ -438,6 +440,10 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
             style={{ userSelect: 'none', WebkitTapHighlightColor: 'transparent' }}
             onMouseDown={(e) => {
               if ((e.target as HTMLElement).closest?.('svg')) e.preventDefault();
+            }}
+            onClick={(e) => {
+              if (dotClickedRef.current) { dotClickedRef.current = false; return; }
+              if ((e.target as HTMLElement).closest?.('svg')) setSelectedSchool(null);
             }}
           >
             <ResponsiveContainer width="100%" height={420}>
@@ -744,21 +750,37 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
           <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-text-secondary">
             Tier
           </label>
-          <select
-            value={tierFilter}
-            onChange={(e) => {
-              setTierFilter(e.target.value);
-              setPage(1);
-            }}
-            className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent"
-          >
-            <option value="">All Tiers</option>
+          <div className="flex flex-wrap gap-1">
             {TIER_ORDER.map((t) => (
-              <option key={t} value={t}>
+              <button
+                key={t}
+                onClick={() => {
+                  setTierFilter((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(t)) next.delete(t);
+                    else next.add(t);
+                    return next;
+                  });
+                  setPage(1);
+                }}
+                className={`rounded-full px-2.5 py-1 text-xs transition-colors ${
+                  tierFilter.has(t)
+                    ? 'bg-accent text-white'
+                    : 'border border-gray-200 bg-white text-text-secondary hover:text-text-primary'
+                }`}
+              >
                 {t}
-              </option>
+              </button>
             ))}
-          </select>
+            {tierFilter.size > 0 && (
+              <button
+                onClick={() => { setTierFilter(new Set()); setPage(1); }}
+                className="rounded-full px-2 py-1 text-xs text-accent hover:bg-accent/10"
+              >
+                Clear
+              </button>
+            )}
+          </div>
         </div>
 
         {filtersActive && (
@@ -767,7 +789,7 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
               setSearchQuery('');
               setOwnershipFilter(null);
               setStateFilter('');
-              setTierFilter('');
+              setTierFilter(new Set());
               setPage(1);
             }}
             className="rounded-lg px-2 py-1.5 text-xs text-accent hover:bg-accent/10"

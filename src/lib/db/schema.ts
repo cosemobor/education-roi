@@ -95,3 +95,10 @@ export const analyticsEvents = sqliteTable('analytics_events', {
   index('idx_analytics_type').on(table.eventType),
   index('idx_analytics_timestamp').on(table.timestamp),
 ]);
+
+export const newsletterSignups = sqliteTable('newsletter_signups', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  email: text('email').notNull().unique(),
+  source: text('source'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+});

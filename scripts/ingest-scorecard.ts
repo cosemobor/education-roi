@@ -140,11 +140,22 @@ async function main() {
     )
   `);
 
+  // Newsletter signups table (persistent — NOT dropped on re-ingest)
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS newsletter_signups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL UNIQUE,
+      source TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
+
   // Create indexes
   await db.run(sql`CREATE INDEX IF NOT EXISTS idx_schools_name ON schools(name)`);
   await db.run(sql`CREATE INDEX IF NOT EXISTS idx_schools_state ON schools(state)`);
   await db.run(sql`CREATE INDEX IF NOT EXISTS idx_programs_cip ON programs(cip_code)`);
   await db.run(sql`CREATE INDEX IF NOT EXISTS idx_programs_unit ON programs(unit_id)`);
+  await db.run(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_newsletter_email ON newsletter_signups(email)`);
 
   // Load data
   console.log('\nLoading JSON data...');

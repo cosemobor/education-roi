@@ -95,4 +95,7 @@ export type AnalyticsEventType =
   | 'school_click'
   | 'program_click'
   | 'tour_complete'
-  | 'tour_skip';
+  | 'tour_skip'
+  | 'newsletter_signup'
+  | 'newsletter_dismiss'
+  | 'newsletter_banner_click';

@@ -83,11 +83,12 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
   const [sortField, setSortField] = useState<SortField>('earn1yr');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [searchQuery, setSearchQuery] = useState('');
-  const [credFilter, setCredFilter] = useState('');
+  const [credFilter, setCredFilter] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
   const [selectedProgram, setSelectedProgram] = useState<string | null>(null);
   const [compareSet, setCompareSet] = useState<Set<string>>(new Set());
   const chartRef = useRef<HTMLDivElement>(null);
+  const dotClickedRef = useRef(false);
 
   const tier = getDisplayTier(school.name, school.selectivityTier, school.admissionRate, school.size);
   const satCombined =
@@ -143,8 +144,8 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
       const q = searchQuery.toLowerCase();
       rows = rows.filter((r) => r.cipTitle.toLowerCase().includes(q));
     }
-    if (credFilter) {
-      rows = rows.filter((r) => r.credTitle === credFilter);
+    if (credFilter.size > 0) {
+      rows = rows.filter((r) => credFilter.has(r.credTitle));
     }
     return rows;
   }, [allRows, searchQuery, credFilter]);
@@ -187,7 +188,7 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
   }, [allRows]);
 
   // Dim/highlight based on filters
-  const hasActiveFilter = !!(searchQuery.trim() || credFilter || compareSet.size > 0);
+  const hasActiveFilter = !!(searchQuery.trim() || credFilter.size > 0 || compareSet.size > 0);
 
   const { dimmedData, highlightedByCategory } = useMemo(() => {
     if (!hasActiveFilter) {
@@ -219,6 +220,7 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
   const handleDotClick = useCallback((data: any) => {
     const key = data?.progKey ?? data?.payload?.progKey;
     if (key != null) {
+      dotClickedRef.current = true;
       setSelectedProgram((prev) => (prev === key ? null : key));
     }
   }, []);
@@ -328,7 +330,7 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
     return pages;
   }, [currentPage, totalPages]);
 
-  const filtersActive = !!(searchQuery || credFilter);
+  const filtersActive = !!(searchQuery || credFilter.size > 0);
 
   return (
     <div>
@@ -404,6 +406,10 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
           style={{ userSelect: 'none', WebkitTapHighlightColor: 'transparent' }}
           onMouseDown={(e) => {
             if ((e.target as HTMLElement).closest?.('svg')) e.preventDefault();
+          }}
+          onClick={(e) => {
+            if (dotClickedRef.current) { dotClickedRef.current = false; return; }
+            if ((e.target as HTMLElement).closest?.('svg')) setSelectedProgram(null);
           }}
         >
           <h3 className="mb-2 px-2 text-sm font-semibold text-text-primary">
@@ -670,21 +676,37 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
             <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-text-secondary">
               Credential
             </label>
-            <select
-              value={credFilter}
-              onChange={(e) => {
-                setCredFilter(e.target.value);
-                setPage(1);
-              }}
-              className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent"
-            >
-              <option value="">All Credentials</option>
+            <div className="flex flex-wrap gap-1">
               {credOptions.map((c) => (
-                <option key={c} value={c}>
+                <button
+                  key={c}
+                  onClick={() => {
+                    setCredFilter((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(c)) next.delete(c);
+                      else next.add(c);
+                      return next;
+                    });
+                    setPage(1);
+                  }}
+                  className={`rounded-full px-2.5 py-1 text-xs transition-colors ${
+                    credFilter.has(c)
+                      ? 'bg-accent text-white'
+                      : 'border border-gray-200 bg-white text-text-secondary hover:text-text-primary'
+                  }`}
+                >
                   {c}
-                </option>
+                </button>
               ))}
-            </select>
+              {credFilter.size > 0 && (
+                <button
+                  onClick={() => { setCredFilter(new Set()); setPage(1); }}
+                  className="rounded-full px-2 py-1 text-xs text-accent hover:bg-accent/10"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -692,7 +714,7 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
           <button
             onClick={() => {
               setSearchQuery('');
-              setCredFilter('');
+              setCredFilter(new Set());
               setPage(1);
             }}
             className="rounded-lg px-2 py-1.5 text-xs text-accent hover:bg-accent/10"
