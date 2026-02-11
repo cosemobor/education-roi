@@ -53,6 +53,7 @@ async function main() {
 
   // Drop and recreate tables to ensure schema is up to date
   console.log('\nCreating tables...');
+  await db.run(sql`DROP TABLE IF EXISTS school_rankings`);
   await db.run(sql`DROP TABLE IF EXISTS programs`);
   await db.run(sql`DROP TABLE IF EXISTS majors_summary`);
   await db.run(sql`DROP TABLE IF EXISTS schools`);
@@ -114,6 +115,31 @@ async function main() {
     )
   `);
 
+  await db.run(sql`
+    CREATE TABLE IF NOT EXISTS school_rankings (
+      unit_id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      city TEXT NOT NULL,
+      state TEXT NOT NULL,
+      ownership INTEGER NOT NULL,
+      ownership_label TEXT NOT NULL,
+      admission_rate REAL,
+      sat_combined REAL,
+      size INTEGER,
+      cost_attendance REAL,
+      net_price REAL,
+      completion_rate REAL,
+      selectivity_tier TEXT NOT NULL,
+      program_count INTEGER NOT NULL,
+      median_earn_1yr REAL,
+      weighted_earn_1yr REAL,
+      weighted_earn_5yr REAL,
+      roi REAL,
+      max_earn_1yr REAL,
+      top_program TEXT
+    )
+  `);
+
   // Create indexes
   await db.run(sql`CREATE INDEX IF NOT EXISTS idx_schools_name ON schools(name)`);
   await db.run(sql`CREATE INDEX IF NOT EXISTS idx_schools_state ON schools(state)`);
@@ -149,13 +175,26 @@ async function main() {
     p75Earn5yr: number | null; growthRate1to5: number | null;
   }
 
+  interface SchoolRankingJson {
+    unitId: number; name: string; city: string; state: string;
+    ownership: number; ownershipLabel: string; admissionRate: number | null;
+    satCombined: number | null; size: number | null;
+    costAttendance: number | null; netPrice: number | null;
+    completionRate: number | null; selectivityTier: string;
+    programCount: number; medianEarn1yr: number | null;
+    weightedEarn1yr: number | null; weightedEarn5yr: number | null;
+    roi: number | null; maxEarn1yr: number | null; topProgram: string | null;
+  }
+
   const schoolsData = loadJson<SchoolJson[]>('schools.json');
   const programsData = loadJson<ProgramJson[]>('programs.json');
   const majorsData = loadJson<MajorJson[]>('majors-summary.json');
+  const schoolRankingsData = loadJson<SchoolRankingJson[]>('school-rankings.json');
 
   console.log(`  ${schoolsData.length.toLocaleString()} schools`);
   console.log(`  ${programsData.length.toLocaleString()} programs`);
   console.log(`  ${majorsData.length} majors`);
+  console.log(`  ${schoolRankingsData.length.toLocaleString()} school rankings`);
 
   // Clear existing data
   console.log('\nClearing existing data...');
@@ -247,14 +286,51 @@ async function main() {
   }
   console.log(`  ${majorsData.length} majors inserted`);
 
+  // Insert school rankings
+  console.log('\nInserting school rankings...');
+  await db.run(sql`DELETE FROM school_rankings`);
+  for (let i = 0; i < schoolRankingsData.length; i += BATCH_SIZE) {
+    const batch = schoolRankingsData.slice(i, i + BATCH_SIZE);
+    await db.insert(schema.schoolRankings).values(
+      batch.map((r) => ({
+        unitId: r.unitId,
+        name: r.name,
+        city: r.city,
+        state: r.state,
+        ownership: r.ownership,
+        ownershipLabel: r.ownershipLabel,
+        admissionRate: r.admissionRate,
+        satCombined: r.satCombined,
+        size: r.size,
+        costAttendance: r.costAttendance,
+        netPrice: r.netPrice,
+        completionRate: r.completionRate,
+        selectivityTier: r.selectivityTier,
+        programCount: r.programCount,
+        medianEarn1yr: r.medianEarn1yr,
+        weightedEarn1yr: r.weightedEarn1yr,
+        weightedEarn5yr: r.weightedEarn5yr,
+        roi: r.roi,
+        maxEarn1yr: r.maxEarn1yr,
+        topProgram: r.topProgram,
+      })),
+    );
+    if ((i + BATCH_SIZE) % 500 === 0 || i + BATCH_SIZE >= schoolRankingsData.length) {
+      process.stdout.write(`\r  ${Math.min(i + BATCH_SIZE, schoolRankingsData.length).toLocaleString()} / ${schoolRankingsData.length.toLocaleString()}`);
+    }
+  }
+  console.log(' done');
+
   // Verify counts
   console.log('\n=== Verification ===');
   const [schoolCount] = await db.all(sql`SELECT COUNT(*) as count FROM schools`);
   const [programCount] = await db.all(sql`SELECT COUNT(*) as count FROM programs`);
   const [majorCount] = await db.all(sql`SELECT COUNT(*) as count FROM majors_summary`);
+  const [rankingCount] = await db.all(sql`SELECT COUNT(*) as count FROM school_rankings`);
   console.log(`  Schools: ${(schoolCount as { count: number }).count}`);
   console.log(`  Programs: ${(programCount as { count: number }).count}`);
   console.log(`  Majors: ${(majorCount as { count: number }).count}`);
+  console.log(`  School Rankings: ${(rankingCount as { count: number }).count}`);
 
   console.log('\nDone!');
 }

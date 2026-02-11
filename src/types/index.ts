@@ -76,12 +76,12 @@ export interface SchoolRanking {
   medianEarn1yr: number | null;
   weightedEarn1yr: number | null;
   weightedEarn5yr: number | null;
-  paybackYears: number | null;
+  roi: number | null;
   maxEarn1yr: number | null;
   topProgram: string | null;
 }
 
-export type ViewTab = 'explorer' | 'majors' | 'colleges';
+export type ViewTab = 'majors' | 'colleges';
 
 export type SortDir = 'asc' | 'desc';
 

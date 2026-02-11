@@ -139,6 +139,17 @@ function percentile(arr: number[], pct: number): number | null {
   return sorted[Math.max(0, idx)];
 }
 
+function weightedAvg(items: { earn: number; count: number }[]): number | null {
+  if (items.length === 0) return null;
+  let totalWeight = 0;
+  let weightedSum = 0;
+  for (const { earn, count } of items) {
+    weightedSum += earn * count;
+    totalWeight += count;
+  }
+  return totalWeight > 0 ? Math.round(weightedSum / totalWeight) : null;
+}
+
 // --- Main ---
 
 function main() {
@@ -211,9 +222,15 @@ function main() {
   }
   console.log(`  ${programs.length.toLocaleString()} programs with earnings data`);
 
-  // 4. Compute major-level summaries
-  console.log('\nComputing major summaries...');
-  const majorMap = new Map<string, { title: string; earn1yr: number[]; earn4yr: number[]; earn5yr: number[] }>();
+  // 4. Compute major-level summaries (weighted by completer count)
+  console.log('\nComputing major summaries (weighted by completer count)...');
+  interface MajorEntry {
+    title: string;
+    earn1yr: { earn: number; count: number }[];
+    earn4yr: { earn: number; count: number }[];
+    earn5yr: { earn: number; count: number }[];
+  }
+  const majorMap = new Map<string, MajorEntry>();
 
   for (const p of programs) {
     let entry = majorMap.get(p.cipCode);
@@ -221,27 +238,31 @@ function main() {
       entry = { title: p.cipTitle, earn1yr: [], earn4yr: [], earn5yr: [] };
       majorMap.set(p.cipCode, entry);
     }
-    if (p.earn1yr != null) entry.earn1yr.push(p.earn1yr);
-    if (p.earn4yr != null) entry.earn4yr.push(p.earn4yr);
-    if (p.earn5yr != null) entry.earn5yr.push(p.earn5yr);
+    // Use completer count as weight; default to 1 if count is missing
+    if (p.earn1yr != null) entry.earn1yr.push({ earn: p.earn1yr, count: p.earn1yrCount ?? 1 });
+    if (p.earn4yr != null) entry.earn4yr.push({ earn: p.earn4yr, count: 1 }); // no count field for 4yr
+    if (p.earn5yr != null) entry.earn5yr.push({ earn: p.earn5yr, count: p.earn5yrCount ?? 1 });
   }
 
   const majorsSummary: MajorSummary[] = [];
   for (const [cipCode, entry] of majorMap) {
-    const med1 = median(entry.earn1yr);
-    const med5 = median(entry.earn5yr);
+    const avg1 = weightedAvg(entry.earn1yr);
+    const avg5 = weightedAvg(entry.earn5yr);
+    // Raw values for percentiles (unweighted — shows school-level distribution)
+    const raw1yr = entry.earn1yr.map((e) => e.earn);
+    const raw5yr = entry.earn5yr.map((e) => e.earn);
     majorsSummary.push({
       cipCode,
       cipTitle: entry.title,
       schoolCount: entry.earn1yr.length,
-      medianEarn1yr: med1,
-      medianEarn4yr: median(entry.earn4yr),
-      medianEarn5yr: med5,
-      p25Earn1yr: percentile(entry.earn1yr, 25),
-      p75Earn1yr: percentile(entry.earn1yr, 75),
-      p25Earn5yr: percentile(entry.earn5yr, 25),
-      p75Earn5yr: percentile(entry.earn5yr, 75),
-      growthRate1to5: med1 && med5 ? Math.round(((med5 - med1) / med1) * 100) : null,
+      medianEarn1yr: avg1,
+      medianEarn4yr: weightedAvg(entry.earn4yr),
+      medianEarn5yr: avg5,
+      p25Earn1yr: percentile(raw1yr, 25),
+      p75Earn1yr: percentile(raw1yr, 75),
+      p25Earn5yr: percentile(raw5yr, 25),
+      p75Earn5yr: percentile(raw5yr, 75),
+      growthRate1to5: avg1 && avg5 ? Math.round(((avg5 - avg1) / avg1) * 100) : null,
     });
   }
 
@@ -249,6 +270,114 @@ function main() {
   majorsSummary.sort((a, b) => (b.medianEarn1yr ?? 0) - (a.medianEarn1yr ?? 0));
 
   console.log(`  ${majorsSummary.length} unique majors`);
+
+  // 4b. Compute school-level rankings (pre-aggregated for homepage)
+  console.log('\nComputing school rankings...');
+
+  interface SchoolEarnings {
+    earn1yr: { earn: number; count: number }[];
+    earn5yr: { earn: number; count: number }[];
+    maxEarn1yr: number;
+    topProgram: string | null;
+    programCount: number;
+  }
+
+  const schoolEarningsMap = new Map<number, SchoolEarnings>();
+  // Programs are already sorted by earn1yr desc (from step 3 processing)
+  for (const p of programs) {
+    let entry = schoolEarningsMap.get(p.unitId);
+    if (!entry) {
+      entry = { earn1yr: [], earn5yr: [], maxEarn1yr: 0, topProgram: null, programCount: 0 };
+      schoolEarningsMap.set(p.unitId, entry);
+    }
+    if (p.earn1yr != null) {
+      entry.earn1yr.push({ earn: p.earn1yr, count: p.earn1yrCount ?? 1 });
+      entry.programCount++;
+      if (p.earn1yr > entry.maxEarn1yr) {
+        entry.maxEarn1yr = p.earn1yr;
+        if (!entry.topProgram) {
+          entry.topProgram = p.cipTitle.replace(/\.+$/, '');
+        }
+      }
+    }
+    if (p.earn5yr != null) {
+      entry.earn5yr.push({ earn: p.earn5yr, count: p.earn5yrCount ?? 1 });
+    }
+  }
+
+  interface SchoolRankingRecord {
+    unitId: number;
+    name: string;
+    city: string;
+    state: string;
+    ownership: number;
+    ownershipLabel: string;
+    admissionRate: number | null;
+    satCombined: number | null;
+    size: number | null;
+    costAttendance: number | null;
+    netPrice: number | null;
+    completionRate: number | null;
+    selectivityTier: string;
+    programCount: number;
+    medianEarn1yr: number | null;
+    weightedEarn1yr: number | null;
+    weightedEarn5yr: number | null;
+    roi: number | null;
+    maxEarn1yr: number | null;
+    topProgram: string | null;
+  }
+
+  const schoolRankings: SchoolRankingRecord[] = [];
+  for (const [unitId, earnings] of schoolEarningsMap) {
+    if (earnings.programCount === 0) continue;
+    const school = schoolMap.get(unitId);
+    if (!school) continue;
+
+    const raw1yr = earnings.earn1yr.map((e) => e.earn);
+    const med1yr = median(raw1yr);
+    const w1yr = weightedAvg(earnings.earn1yr);
+    const w5yr = weightedAvg(earnings.earn5yr);
+    const cost = school.costAttendance;
+    const satCombined =
+      school.satMath75 != null && school.satRead75 != null
+        ? school.satMath75 + school.satRead75
+        : null;
+    const netPrice =
+      school.ownership === 1
+        ? (school.netPricePublic ?? cost)
+        : (school.netPricePrivate ?? cost);
+    const roi =
+      w1yr != null && cost != null && cost > 0
+        ? Math.round((w1yr / cost) * 100) / 100
+        : null;
+
+    schoolRankings.push({
+      unitId,
+      name: school.name,
+      city: school.city,
+      state: school.state,
+      ownership: school.ownership,
+      ownershipLabel: school.ownershipLabel,
+      admissionRate: school.admissionRate,
+      satCombined,
+      size: school.size,
+      costAttendance: cost,
+      netPrice,
+      completionRate: school.completionRate,
+      selectivityTier: school.selectivityTier,
+      programCount: earnings.programCount,
+      medianEarn1yr: med1yr,
+      weightedEarn1yr: w1yr,
+      weightedEarn5yr: w5yr,
+      roi,
+      maxEarn1yr: earnings.maxEarn1yr,
+      topProgram: earnings.topProgram,
+    });
+  }
+
+  schoolRankings.sort((a, b) => (b.weightedEarn1yr ?? 0) - (a.weightedEarn1yr ?? 0));
+  console.log(`  ${schoolRankings.length.toLocaleString()} school rankings`);
 
   // 5. Write output files
   console.log('\nWriting output files...');
@@ -262,6 +391,9 @@ function main() {
 
   writeFileSync(path.join(DATA_DIR, 'majors-summary.json'), JSON.stringify(majorsSummary, null, 2));
   console.log(`  majors-summary.json: ${majorsSummary.length} majors`);
+
+  writeFileSync(path.join(DATA_DIR, 'school-rankings.json'), JSON.stringify(schoolRankings));
+  console.log(`  school-rankings.json: ${schoolRankings.length.toLocaleString()} school rankings`);
 
   // 6. Print top 20 majors
   console.log('\n=== Top 20 Majors by Median 1-Year Earnings ===');

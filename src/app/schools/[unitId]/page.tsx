@@ -6,7 +6,7 @@ import type { School, ProgramRecord } from '@/types';
 import SchoolDetail from '@/components/SchoolDetail';
 import PageNav from '@/components/PageNav';
 
-export const dynamic = 'force-dynamic';
+export const revalidate = 3600;
 
 interface PageProps {
   params: Promise<{ unitId: string }>;

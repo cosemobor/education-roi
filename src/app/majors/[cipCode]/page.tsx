@@ -6,7 +6,7 @@ import type { MajorSummary, ProgramRecord } from '@/types';
 import MajorDetail from '@/components/MajorDetail';
 import PageNav from '@/components/PageNav';
 
-export const dynamic = 'force-dynamic';
+export const revalidate = 3600;
 
 interface PageProps {
   params: Promise<{ cipCode: string }>;

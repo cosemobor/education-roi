@@ -60,6 +60,29 @@ export const majorsSummary = sqliteTable('majors_summary', {
   growthRate: real('growth_rate'),
 });
 
+export const schoolRankings = sqliteTable('school_rankings', {
+  unitId: integer('unit_id').primaryKey(),
+  name: text('name').notNull(),
+  city: text('city').notNull(),
+  state: text('state').notNull(),
+  ownership: integer('ownership').notNull(),
+  ownershipLabel: text('ownership_label').notNull(),
+  admissionRate: real('admission_rate'),
+  satCombined: real('sat_combined'),
+  size: integer('size'),
+  costAttendance: real('cost_attendance'),
+  netPrice: real('net_price'),
+  completionRate: real('completion_rate'),
+  selectivityTier: text('selectivity_tier').notNull(),
+  programCount: integer('program_count').notNull(),
+  medianEarn1yr: real('median_earn_1yr'),
+  weightedEarn1yr: real('weighted_earn_1yr'),
+  weightedEarn5yr: real('weighted_earn_5yr'),
+  roi: real('roi'),
+  maxEarn1yr: real('max_earn_1yr'),
+  topProgram: text('top_program'),
+});
+
 export const analyticsEvents = sqliteTable('analytics_events', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   sessionId: text('session_id').notNull(),

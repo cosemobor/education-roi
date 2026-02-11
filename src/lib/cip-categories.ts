@@ -31,7 +31,7 @@ export const CIP_CATEGORY_COLORS: Record<string, string> = {
   Health: '#059669',
   Business: '#d97706',
   'Liberal Arts': '#e11d48',
-  Other: '#6b7280',
+  Other: '#475569',
 };
 
 export const CIP_CATEGORY_ORDER = [

@@ -6,9 +6,8 @@ import { useSearchParams } from 'next/navigation';
 import type { ViewTab, MajorSummary, SchoolRanking } from '@/types';
 import { trackEvent } from '@/lib/analytics';
 
-const VALID_TABS: ViewTab[] = ['explorer', 'majors', 'colleges'];
+const VALID_TABS: ViewTab[] = ['majors', 'colleges'];
 import PageNav from '@/components/PageNav';
-import DotPlot from '@/components/DotPlot';
 import MajorRankings from '@/components/MajorRankings';
 import CollegeRankings from '@/components/CollegeRankings';
 import GuidedTour from '@/components/GuidedTour';
@@ -23,7 +22,7 @@ export default function AppShell({ majorsSummary, schoolRankings }: AppShellProp
   const searchParams = useSearchParams();
   const initialTab = searchParams.get('tab') as ViewTab | null;
   const [activeTab, setActiveTab] = useState<ViewTab>(
-    initialTab && VALID_TABS.includes(initialTab) ? initialTab : 'explorer',
+    initialTab && VALID_TABS.includes(initialTab) ? initialTab : 'majors',
   );
   const [tourKey, setTourKey] = useState(0);
   const handleStartTour = useCallback(() => setTourKey((k) => k + 1), []);
@@ -57,9 +56,6 @@ export default function AppShell({ majorsSummary, schoolRankings }: AppShellProp
         />
       </div>
 
-      {activeTab === 'explorer' && (
-        <DotPlot majorsSummary={majorsSummary} schoolRankings={schoolRankings} />
-      )}
       {activeTab === 'majors' && (
         <MajorRankings majorsSummary={majorsSummary} />
       )}

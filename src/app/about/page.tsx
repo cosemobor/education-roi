@@ -136,16 +136,17 @@ export default function AboutPage() {
           high-earning programs from dominating the rankings.
         </p>
         <p>
-          <strong>Payback period</strong> estimates how many years of
-          post-graduation earnings it takes to recoup the total cost of a
-          four-year degree. It uses net price (after financial aid) rather than
-          sticker price, divided into graduate-weighted average first-year
-          earnings. Fewer years = better value.
+          <strong>ROI (Return on Investment)</strong> is calculated as
+          first-year weighted average earnings divided by cost of attendance.
+          A higher ratio means graduates earn more relative to what they paid.
+          We use published cost of attendance rather than net price because net
+          price varies significantly by family income, financial aid package, and
+          scholarship awards &mdash; making it inconsistent across students.
         </p>
         <p>
-          <strong>Major rankings</strong> use unweighted median earnings across
-          all schools offering that major, with percentile ranges
-          (25th&ndash;75th) to show the spread.
+          <strong>Major rankings</strong> use graduate-weighted average earnings
+          across all schools offering that major, with percentile ranges
+          (25th&ndash;75th) to show the spread of outcomes across institutions.
         </p>
         <p>
           Earnings reflect median values &mdash; half of graduates earn more and
@@ -160,10 +161,11 @@ export default function AboutPage() {
             graduates, then summed and divided by total graduates. Gives more
             weight to programs that produce more graduates.
           </MetricDef>
-          <MetricDef term="Payback Period">
-            Total four-year net cost divided by first-year weighted average
-            earnings. Represents how many years of earnings it takes to recoup
-            the investment in a degree.
+          <MetricDef term="ROI (Return on Investment)">
+            First-year weighted average earnings divided by cost of attendance.
+            Displayed as a multiplier (e.g., 1.5x means graduates earn 1.5
+            times what they paid). Higher is better. Uses published cost of
+            attendance for consistency across schools.
           </MetricDef>
           <MetricDef term="Earnings Growth Rate">
             The percentage change from first-year to fifth-year median earnings.
@@ -171,9 +173,10 @@ export default function AboutPage() {
             the workforce.
           </MetricDef>
           <MetricDef term="Selectivity Tiers">
-            Schools are grouped into tiers based on admission rate and SAT
-            scores: Ivy League, Ivy Adjacent, Top 40, Competitive, and Standard.
-            These tiers help contextualize earnings comparisons.
+            Schools are grouped into tiers based on admission rate, SAT scores,
+            and institutional characteristics: Ivy League, Ivy Adjacent, Top 40,
+            Competitive, and Standard. These tiers help contextualize earnings
+            comparisons.
           </MetricDef>
         </dl>
       </Section>
@@ -243,14 +246,11 @@ export default function AboutPage() {
             student privacy. Some programs and schools may be missing.
           </li>
           <li>
-            <strong>Net price vs. sticker price</strong> &mdash; Payback
-            calculations use net price after financial aid, which better reflects
-            what students actually pay but varies significantly by family income.
-          </li>
-          <li>
-            <strong>Four-year cost assumption</strong> &mdash; Payback period
-            assumes a four-year degree cost even though many students take longer
-            to graduate.
+            <strong>Cost of attendance</strong> &mdash; ROI calculations use
+            published cost of attendance (sticker price) rather than net price
+            after financial aid. This provides a consistent baseline across
+            schools, though individual students may pay more or less depending
+            on their aid package.
           </li>
           <li>
             <strong>No cost-of-living adjustment</strong> &mdash; Earnings are

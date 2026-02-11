@@ -10,7 +10,6 @@ import {
   CartesianGrid,
   ReferenceLine,
   ResponsiveContainer,
-  Legend,
 } from 'recharts';
 import Link from 'next/link';
 import type { MajorSummary, ProgramRecord, SortDir } from '@/types';
@@ -19,6 +18,7 @@ import { getDisplayTier, TIER_COLORS, TIER_ORDER } from '@/lib/tiers';
 import { generateMajorDescription } from '@/lib/descriptions';
 import StatCard from './StatCard';
 import ShareButton from './ShareButton';
+import SortableHeader from './SortableHeader';
 
 type EarningsKey = 'earn1yr' | 'earn5yr';
 type SortField = 'schoolName' | 'earn1yr' | 'earn5yr' | 'cost' | 'multiple' | 'admissionRate';
@@ -35,6 +35,7 @@ interface DotDatum {
   credTitle: string;
   costAttendance: number;
   earnings: number;
+  admissionRate: number | null;
 }
 
 function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: DotDatum }> }) {
@@ -48,6 +49,11 @@ function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{
         <span>Earnings: <strong className="text-earn-above">{formatCurrency(d.earnings)}</strong></span>
         <span>Cost: <strong>{formatCurrency(d.costAttendance)}</strong></span>
       </div>
+      {d.admissionRate != null && (
+        <p className="mt-1 text-[10px] text-text-secondary">
+          Acceptance: {formatRate(d.admissionRate)}
+        </p>
+      )}
       <span
         className="mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium text-white"
         style={{ backgroundColor: TIER_COLORS[d.tier] ?? '#9ca3af' }}
@@ -86,9 +92,11 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
   const [searchQuery, setSearchQuery] = useState('');
   const [ownershipFilter, setOwnershipFilter] = useState<number | null>(null);
   const [stateFilter, setStateFilter] = useState('');
+  const [tierFilter, setTierFilter] = useState('');
   const [page, setPage] = useState(1);
   const [earningsKey, setEarningsKey] = useState<EarningsKey>('earn1yr');
   const [selectedSchool, setSelectedSchool] = useState<number | null>(null);
+  const [compareSet, setCompareSet] = useState<Set<number>>(new Set());
   const chartRef = useRef<HTMLDivElement>(null);
 
   // Close detail card on Escape
@@ -114,7 +122,7 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
         unitId: p.unitId,
         schoolName: p.schoolName,
         state: p.state,
-        tier: getDisplayTier(p.schoolName, p.selectivityTier || ''),
+        tier: getDisplayTier(p.schoolName, p.selectivityTier || '', p.admissionRate, p.size),
         credTitle: p.credTitle,
         earn1yr: p.earn1yr,
         earn5yr: p.earn5yr,
@@ -149,19 +157,37 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
     if (stateFilter) {
       rows = rows.filter((r) => r.state === stateFilter);
     }
+    if (tierFilter) {
+      rows = rows.filter((r) => r.tier === tierFilter);
+    }
     return rows;
-  }, [allRows, searchQuery, ownershipFilter, stateFilter, programs]);
+  }, [allRows, searchQuery, ownershipFilter, stateFilter, tierFilter, programs]);
 
-  // Chart data — filtered rows with valid cost + earnings
-  const chartFiltered = useMemo(() => {
-    return filtered.filter((r) => r.cost > 0 && r[earningsKey] != null);
-  }, [filtered, earningsKey]);
+  // Static axes — computed from max of BOTH earn1yr and earn5yr so toggle doesn't rescale
+  const { xDomain, yDomain, yTicks } = useMemo(() => {
+    let maxX = 0, maxY = 0;
+    for (const r of allRows) {
+      if (r.cost <= 0) continue;
+      if (r.cost > maxX) maxX = r.cost;
+      if (r.earn1yr != null && r.earn1yr > maxY) maxY = r.earn1yr;
+      if (r.earn5yr != null && r.earn5yr > maxY) maxY = r.earn5yr;
+    }
+    const yMax = Math.max(100000, Math.ceil(maxY / 25000) * 25000);
+    const xMax = Math.max(80000, Math.ceil(maxX / 10000) * 10000);
+    const ticks = Array.from({ length: yMax / 25000 + 1 }, (_, i) => i * 25000);
+    return {
+      xDomain: [0, xMax] as [number, number],
+      yDomain: [0, yMax] as [number, number],
+      yTicks: ticks,
+    };
+  }, [allRows]);
 
-  const tierData = useMemo(() => {
-    const groups: Record<string, DotDatum[]> = {};
-    for (const r of chartFiltered) {
-      if (!groups[r.tier]) groups[r.tier] = [];
-      groups[r.tier].push({
+  // Chart data points — recomputed on toggle but axes stay fixed
+  const allChartData = useMemo(() => {
+    const all: DotDatum[] = [];
+    for (const r of allRows) {
+      if (r.cost <= 0 || r[earningsKey] == null) continue;
+      all.push({
         x: r.cost,
         y: r[earningsKey]!,
         unitId: r.unitId,
@@ -171,33 +197,41 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
         credTitle: r.credTitle,
         costAttendance: r.cost,
         earnings: r[earningsKey]!,
+        admissionRate: r.admissionRate,
       });
     }
-    return groups;
-  }, [chartFiltered, earningsKey]);
+    return all;
+  }, [allRows, earningsKey]);
 
-  const { yDomain, xDomain } = useMemo(() => {
-    if (!chartFiltered.length)
-      return {
-        yDomain: [0, 100000] as [number, number],
-        xDomain: [0, 80000] as [number, number],
-      };
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const r of chartFiltered) {
-      const x = r.cost;
-      const y = r[earningsKey]!;
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
+  // Dim/highlight: when filters active, dim non-matching points
+  const hasActiveFilter = !!(searchQuery.trim() || ownershipFilter != null || stateFilter || tierFilter || compareSet.size > 0);
+
+  const { dimmedData, highlightedByTier } = useMemo(() => {
+    if (!hasActiveFilter) {
+      const groups: Record<string, DotDatum[]> = {};
+      for (const d of allChartData) {
+        if (!groups[d.tier]) groups[d.tier] = [];
+        groups[d.tier].push(d);
+      }
+      return { dimmedData: [] as DotDatum[], highlightedByTier: groups };
     }
-    const yPad = (maxY - minY) * 0.1 || 5000;
-    const xPad = (maxX - minX) * 0.05 || 2000;
-    return {
-      yDomain: [Math.max(0, minY - yPad), maxY + yPad] as [number, number],
-      xDomain: [Math.max(0, minX - xPad), maxX + xPad] as [number, number],
-    };
-  }, [chartFiltered, earningsKey]);
+    const highlightIds = compareSet.size > 0
+      ? compareSet
+      : new Set(filtered.map((r) => r.unitId));
+    const dimmed: DotDatum[] = [];
+    const groups: Record<string, DotDatum[]> = {};
+    for (const d of allChartData) {
+      if (highlightIds.has(d.unitId)) {
+        if (!groups[d.tier]) groups[d.tier] = [];
+        groups[d.tier].push(d);
+      } else {
+        dimmed.push(d);
+      }
+    }
+    return { dimmedData: dimmed, highlightedByTier: groups };
+  }, [allChartData, filtered, compareSet, hasActiveFilter]);
+
+  const hasScatterData = allChartData.length > 0;
 
   const medianLine = earningsKey === 'earn1yr' ? major.medianEarn1yr : major.medianEarn5yr;
 
@@ -214,6 +248,35 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
     setSelectedSchool((prev) => (prev === unitId ? null : unitId));
     chartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, []);
+
+  const handleCompareToggle = useCallback((unitId: number) => {
+    setCompareSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(unitId)) {
+        next.delete(unitId);
+      } else if (next.size < 4) {
+        next.add(unitId);
+      }
+      return next;
+    });
+  }, []);
+
+  const stats = useMemo(() => {
+    const earnKey = earningsKey === 'earn1yr' ? 'earn1yr' : 'earn5yr';
+    const withEarn = allRows.filter((r) => r[earnKey] != null);
+    const highest = withEarn.length
+      ? withEarn.reduce((best, r) =>
+          (r[earnKey] ?? 0) > (best[earnKey] ?? 0) ? r : best,
+          withEarn[0],
+        )
+      : null;
+    return { highest, highestEarnKey: earnKey as 'earn1yr' | 'earn5yr' };
+  }, [allRows, earningsKey]);
+
+  const comparedSchools = useMemo(() => {
+    if (compareSet.size === 0) return [];
+    return allRows.filter((r) => compareSet.has(r.unitId));
+  }, [allRows, compareSet]);
 
   const selectedRow = useMemo(() => {
     if (selectedSchool == null) return null;
@@ -278,11 +341,6 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
     setPage(1);
   }, [sortField]);
 
-  const sortArrow = (field: SortField) => {
-    if (sortField !== field) return ' \u21D5';
-    return sortDir === 'asc' ? ' \u2191' : ' \u2193';
-  };
-
   const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value);
     setPage(1);
@@ -299,7 +357,7 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
     return pages;
   }, [currentPage, totalPages]);
 
-  const filtersActive = !!(searchQuery || ownershipFilter != null || stateFilter);
+  const filtersActive = !!(searchQuery || ownershipFilter != null || stateFilter || tierFilter);
 
   return (
     <div>
@@ -329,12 +387,13 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
       <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label="Schools" value={formatNumber(major.schoolCount)} />
         <StatCard
-          label="Median 1yr"
-          value={formatCurrency(major.medianEarn1yr)}
+          label={`Highest Earning (${earningsKey === 'earn1yr' ? '1yr' : '5yr'})`}
+          value={stats.highest ? formatCurrency(stats.highest[stats.highestEarnKey]) : '\u2014'}
+          detail={stats.highest?.schoolName}
         />
         <StatCard
-          label="Median 5yr"
-          value={formatCurrency(major.medianEarn5yr)}
+          label={`Median (${earningsKey === 'earn1yr' ? '1yr' : '5yr'})`}
+          value={formatCurrency(earningsKey === 'earn1yr' ? major.medianEarn1yr : major.medianEarn5yr)}
         />
         <StatCard
           label="Earnings Growth"
@@ -343,11 +402,11 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
       </div>
 
       {/* Scatter chart */}
-      {chartFiltered.length > 0 && (
+      {hasScatterData && (
         <div className="mt-6 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-text-primary">
-              Earnings vs. Cost &mdash; {chartFiltered.length} Schools
+              Earnings vs. Cost &mdash; {allChartData.length} Schools
             </h2>
             <div className="flex rounded-lg border border-gray-200 text-xs">
               <button
@@ -404,6 +463,7 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
                   type="number"
                   name="Earnings"
                   domain={yDomain}
+                  ticks={yTicks}
                   tickFormatter={(v: number) => formatCompact(v)}
                   tick={{ fontSize: 11, fill: '#6b7280' }}
                   width={60}
@@ -417,30 +477,40 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
                   }}
                 />
                 <Tooltip content={<ChartTooltip />} cursor={false} />
+                <ReferenceLine
+                  segment={[{ x: 0, y: 0 }, { x: xDomain[1], y: xDomain[1] }]}
+                  stroke="#ef4444"
+                  strokeDasharray="6 4"
+                  strokeWidth={1.5}
+                  strokeOpacity={0.6}
+                />
                 {medianLine && (
                   <ReferenceLine
                     y={medianLine}
                     stroke="#6b7280"
                     strokeDasharray="6 4"
-                    label={{
-                      value: `National Median ${formatCompact(medianLine)}`,
-                      position: 'right',
-                      fontSize: 11,
-                      fill: '#6b7280',
-                    }}
                   />
                 )}
-                <Legend
-                  verticalAlign="top"
-                  wrapperStyle={{ fontSize: 11, paddingBottom: 8 }}
-                />
-                {TIER_ORDER.map(
+                {/* Dimmed background points (non-matching when filter active) */}
+                {dimmedData.length > 0 && (
+                  <Scatter
+                    name="Other"
+                    data={dimmedData}
+                    fill="#d1d5db"
+                    fillOpacity={0.3}
+                    shape={renderDot}
+                    onClick={handleDotClick}
+                    isAnimationActive={false}
+                  />
+                )}
+                {/* Highlighted points by tier — reverse so top tiers render last (on top) */}
+                {[...TIER_ORDER].reverse().map(
                   (tier) =>
-                    tierData[tier] && (
+                    highlightedByTier[tier] && (
                       <Scatter
                         key={tier}
                         name={tier}
-                        data={tierData[tier]}
+                        data={highlightedByTier[tier]}
                         fill={TIER_COLORS[tier]}
                         shape={renderDot}
                         onClick={handleDotClick}
@@ -449,6 +519,37 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
                 )}
               </ScatterChart>
             </ResponsiveContainer>
+            <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1">
+              {TIER_ORDER.map((tier) => {
+                const hasHighlighted = !!highlightedByTier[tier];
+                return (
+                  <span
+                    key={tier}
+                    className={`flex items-center gap-1.5 text-xs ${hasHighlighted || !hasActiveFilter ? 'text-text-secondary' : 'text-text-secondary/40'}`}
+                  >
+                    <span
+                      className="inline-block h-2.5 w-2.5 rounded-full"
+                      style={{
+                        backgroundColor: hasHighlighted || !hasActiveFilter
+                          ? TIER_COLORS[tier]
+                          : '#d1d5db',
+                      }}
+                    />
+                    {tier}
+                  </span>
+                );
+              })}
+              <span className="flex items-center gap-1.5 text-xs text-text-secondary">
+                <span className="inline-block h-0 w-4 border-t-[1.5px] border-dashed" style={{ borderColor: '#ef4444', opacity: 0.6 }} />
+                Break Even
+              </span>
+              {medianLine && (
+                <span className="flex items-center gap-1.5 text-xs text-text-secondary">
+                  <span className="inline-block h-0 w-4 border-t-[1.5px] border-dashed border-gray-500" />
+                  Median ({formatCompact(medianLine)})
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Detail card — shown when a school dot is selected */}
@@ -506,6 +607,59 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
               </Link>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Comparison panel */}
+      {comparedSchools.length >= 2 && (
+        <div className="mt-6 rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-text-primary">
+              Comparing {comparedSchools.length} Schools
+            </h3>
+            <button
+              onClick={() => setCompareSet(new Set())}
+              className="text-xs text-accent hover:underline"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${comparedSchools.length}, 1fr)` }}>
+            {comparedSchools.map((r) => (
+              <div key={r.unitId} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                    style={{ backgroundColor: TIER_COLORS[r.tier] ?? '#9ca3af' }}
+                  />
+                  <span className="truncate text-xs font-semibold text-text-primary">
+                    {r.schoolName}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[10px] text-text-secondary">{r.state} &middot; {r.tier}</p>
+                <div className="mt-2 space-y-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">1yr Earnings</span>
+                    <span className="font-medium text-earn-above">{formatCurrency(r.earn1yr)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">5yr Earnings</span>
+                    <span className="font-medium text-earn-above">
+                      {r.earn5yr != null ? formatCurrency(r.earn5yr) : '\u2014'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">Cost</span>
+                    <span className="font-medium">{r.cost > 0 ? formatCurrency(r.cost) : '\u2014'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">ROI</span>
+                    <span className="font-semibold">{r.multiple > 0 ? r.multiple.toFixed(1) + 'x' : '\u2014'}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -586,12 +740,34 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
           </div>
         )}
 
+        <div>
+          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-text-secondary">
+            Tier
+          </label>
+          <select
+            value={tierFilter}
+            onChange={(e) => {
+              setTierFilter(e.target.value);
+              setPage(1);
+            }}
+            className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent"
+          >
+            <option value="">All Tiers</option>
+            {TIER_ORDER.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {filtersActive && (
           <button
             onClick={() => {
               setSearchQuery('');
               setOwnershipFilter(null);
               setStateFilter('');
+              setTierFilter('');
               setPage(1);
             }}
             className="rounded-lg px-2 py-1.5 text-xs text-accent hover:bg-accent/10"
@@ -611,43 +787,57 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
         <table className="w-full text-xs">
           <thead className="border-b border-gray-100 bg-gray-50 text-left">
             <tr>
+              <th className="w-8 px-2 py-2 text-center font-medium text-text-secondary">
+                <span className="sr-only">Compare</span>
+              </th>
               <th className="px-3 py-2 font-medium text-text-secondary">#</th>
-              <th
-                className="cursor-pointer px-3 py-2 font-medium text-text-secondary hover:text-text-primary"
-                onClick={() => handleSort('schoolName')}
-              >
-                School{sortArrow('schoolName')}
-              </th>
-              <th
-                className="cursor-pointer px-3 py-2 text-right font-medium text-text-secondary hover:text-text-primary"
-                onClick={() => handleSort('earn1yr')}
-              >
-                1yr Earnings{sortArrow('earn1yr')}
-              </th>
-              <th
-                className="hidden cursor-pointer px-3 py-2 text-right font-medium text-text-secondary hover:text-text-primary sm:table-cell"
-                onClick={() => handleSort('earn5yr')}
-              >
-                5yr Earnings{sortArrow('earn5yr')}
-              </th>
-              <th
-                className="hidden cursor-pointer px-3 py-2 text-right font-medium text-text-secondary hover:text-text-primary sm:table-cell"
-                onClick={() => handleSort('cost')}
-              >
-                Cost{sortArrow('cost')}
-              </th>
-              <th
-                className="cursor-pointer px-3 py-2 text-right font-medium text-text-secondary hover:text-text-primary"
-                onClick={() => handleSort('multiple')}
-              >
-                ROI{sortArrow('multiple')}
-              </th>
-              <th
-                className="hidden cursor-pointer px-3 py-2 text-right font-medium text-text-secondary hover:text-text-primary md:table-cell"
-                onClick={() => handleSort('admissionRate')}
-              >
-                Admit{sortArrow('admissionRate')}
-              </th>
+              <SortableHeader<SortField>
+                label="School"
+                sortKey="schoolName"
+                currentSortKey={sortField}
+                currentSortDir={sortDir}
+                onClick={handleSort}
+              />
+              <SortableHeader<SortField>
+                label="1yr Earnings"
+                sortKey="earn1yr"
+                currentSortKey={sortField}
+                currentSortDir={sortDir}
+                onClick={handleSort}
+                className="text-right"
+              />
+              <SortableHeader<SortField>
+                label="5yr Earnings"
+                sortKey="earn5yr"
+                currentSortKey={sortField}
+                currentSortDir={sortDir}
+                onClick={handleSort}
+                className="hidden text-right sm:table-cell"
+              />
+              <SortableHeader<SortField>
+                label="Cost"
+                sortKey="cost"
+                currentSortKey={sortField}
+                currentSortDir={sortDir}
+                onClick={handleSort}
+                className="hidden text-right sm:table-cell"
+              />
+              <SortableHeader<SortField>
+                label="ROI"
+                sortKey="multiple"
+                currentSortKey={sortField}
+                currentSortDir={sortDir}
+                onClick={handleSort}
+                className="text-right"
+              />
+              <SortableHeader<SortField>
+                label="Admit"
+                sortKey="admissionRate"
+                currentSortKey={sortField}
+                currentSortDir={sortDir}
+                onClick={handleSort}
+                className="hidden text-right md:table-cell"
+              />
               <th className="hidden px-3 py-2 text-right font-medium text-text-secondary lg:table-cell">
                 SAT
               </th>
@@ -658,10 +848,23 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
               <tr
                 key={`${r.unitId}-${r.rank}`}
                 className={`cursor-pointer border-t border-gray-50 transition-colors ${
-                  selectedSchool === r.unitId ? 'bg-accent/10' : 'hover:bg-gray-50'
+                  selectedSchool === r.unitId
+                    ? 'bg-accent/10'
+                    : compareSet.has(r.unitId)
+                      ? 'bg-accent/5'
+                      : 'hover:bg-gray-50'
                 }`}
                 onClick={() => handleRowClick(r.unitId)}
               >
+                <td className="w-8 px-2 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={compareSet.has(r.unitId)}
+                    disabled={!compareSet.has(r.unitId) && compareSet.size >= 4}
+                    onChange={() => handleCompareToggle(r.unitId)}
+                    className="h-3.5 w-3.5 rounded border-gray-300 text-accent accent-accent"
+                  />
+                </td>
                 <td className="px-3 py-2 text-text-secondary">{r.rank}</td>
                 <td className="px-3 py-2">
                   <span className="flex items-center gap-1.5">
@@ -704,7 +907,7 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
             {paginated.length === 0 && (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={9}
                   className="px-3 py-8 text-center text-sm text-text-secondary"
                 >
                   No programs match your filters

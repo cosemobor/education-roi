@@ -22,21 +22,14 @@ const STEPS: TourStep[] = [
     target: 'nav-tabs',
     title: 'Navigate Views',
     content:
-      'Switch between the College x Major explorer, college rankings, and major rankings using these tabs.',
-    position: 'bottom',
-  },
-  {
-    target: 'search-input',
-    title: 'Search Majors & Colleges',
-    content:
-      'Search for any major or college. Select a major to see earnings vs cost for every school offering it.',
+      'Switch between major rankings and college rankings using these tabs.',
     position: 'bottom',
   },
   {
     target: 'scatter-chart',
     title: 'Interactive Chart',
     content:
-      'Each dot represents a school-major program. Click any dot to see details. Dots are color-coded by selectivity tier.',
+      'Each dot represents a major or school. Click any dot to see details, or use filters to highlight specific groups.',
     position: 'top',
   },
   {

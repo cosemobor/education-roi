@@ -1,8 +1,7 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   ScatterChart, Scatter, XAxis, YAxis, Tooltip,
   CartesianGrid, ResponsiveContainer,
@@ -20,9 +19,9 @@ interface MajorScatterDatum {
   cipCode: string;
   cipTitle: string;
   category: string;
-  spread: number;
+  median1yr: number;
   median5yr: number;
-  growthRate: number | null;
+  growthRate: number;
   schoolCount: number;
 }
 
@@ -33,17 +32,18 @@ function MajorChartTooltip({ active, payload }: { active?: boolean; payload?: Ar
     <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-lg">
       <p className="text-sm font-semibold text-text-primary">{d.cipTitle.replace(/\.+$/, '')}</p>
       <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs">
+        <span>Median 1yr: <strong className="text-earn-above">{formatCurrency(d.median1yr)}</strong></span>
         <span>Median 5yr: <strong className="text-earn-above">{formatCurrency(d.median5yr)}</strong></span>
-        <span>Spread: <strong>{formatCompact(d.spread)}</strong></span>
-        <span>Growth: <strong className={d.growthRate != null && d.growthRate > 0 ? 'text-earn-above' : 'text-text-secondary'}>{d.growthRate != null ? `${d.growthRate > 0 ? '+' : ''}${d.growthRate}%` : '\u2014'}</strong></span>
+        <span>Growth: <strong className={d.growthRate > 0 ? 'text-earn-above' : 'text-text-secondary'}>{d.growthRate > 0 ? '+' : ''}{d.growthRate}%</strong></span>
         <span>Schools: <strong>{d.schoolCount}</strong></span>
       </div>
       <span
         className="mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium text-white"
-        style={{ backgroundColor: CIP_CATEGORY_COLORS[d.category] ?? '#6b7280' }}
+        style={{ backgroundColor: CIP_CATEGORY_COLORS[d.category] ?? '#475569' }}
       >
         {d.category}
       </span>
+      <p className="mt-1.5 text-[10px] text-text-secondary">Click to see details</p>
     </div>
   );
 }
@@ -57,14 +57,25 @@ interface MajorRankingsProps {
 }
 
 export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
-  const router = useRouter();
-  const [sortKey, setSortKey] = useState<SortKey>('medianEarn5yr');
+  const [sortKey, setSortKey] = useState<SortKey>('medianEarn1yr');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [minSchools, setMinSchools] = useState(10);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
   const [compareSet, setCompareSet] = useState<Set<string>>(new Set());
+  const [chartEarnings, setChartEarnings] = useState<'earn1yr' | 'earn5yr'>('earn1yr');
+  const [selectedMajor, setSelectedMajor] = useState<string | null>(null);
+  const chartRef = useRef<HTMLDivElement>(null);
+
+  // Close detail card on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedMajor(null);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   const handleSort = useCallback((key: SortKey) => {
     if (key === sortKey) {
@@ -125,10 +136,11 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
   );
 
   const stats = useMemo(() => {
-    const withEarn = filtered.filter((m) => m.medianEarn5yr != null);
+    const earnKey: 'medianEarn1yr' | 'medianEarn5yr' = chartEarnings === 'earn1yr' ? 'medianEarn1yr' : 'medianEarn5yr';
+    const withEarn = filtered.filter((m) => m[earnKey] != null);
     const highest = withEarn.length
       ? withEarn.reduce((best, m) =>
-          (m.medianEarn5yr ?? 0) > (best.medianEarn5yr ?? 0) ? m : best,
+          (m[earnKey] ?? 0) > (best[earnKey] ?? 0) ? m : best,
           withEarn[0],
         )
       : null;
@@ -139,8 +151,8 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
           withGrowth[0],
         )
       : null;
-    return { total: filtered.length, highest, fastestGrowth };
-  }, [filtered]);
+    return { total: filtered.length, highest, highestEarnKey: earnKey, fastestGrowth };
+  }, [filtered, chartEarnings]);
 
   // Comparison
   const comparedMajors = useMemo(() => {
@@ -160,50 +172,111 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
     });
   }, []);
 
-  // Scatter chart data: 5yr Median Earnings vs Earnings Spread, grouped by category
-  const { categoryData, xDomain, yDomain } = useMemo(() => {
-    const groups: Record<string, MajorScatterDatum[]> = {};
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const m of filtered) {
-      if (m.medianEarn5yr == null || m.p75Earn5yr == null || m.p25Earn5yr == null) continue;
-      const spread = m.p75Earn5yr - m.p25Earn5yr;
-      if (spread <= 0) continue;
-      const category = getCipCategory(m.cipCode);
-      if (!groups[category]) groups[category] = [];
-      groups[category].push({
-        x: m.medianEarn5yr,
-        y: spread,
+  // Scatter chart: always show all qualifying data; dim non-matching points
+  const earningsField = chartEarnings === 'earn1yr' ? 'medianEarn1yr' : 'medianEarn5yr';
+  const hasActiveFilter = !!(searchQuery.trim() || categoryFilter || compareSet.size > 0);
+
+  // Base chart data: minSchools filter only (axes stay stable)
+  const { allChartData, xDomain, yDomain } = useMemo(() => {
+    const all: MajorScatterDatum[] = [];
+    let minX = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const m of majorsSummary) {
+      if (m.schoolCount < minSchools) continue;
+      if (m.growthRate == null || m[earningsField] == null || m.medianEarn1yr == null || m.medianEarn5yr == null) continue;
+      const earnings = m[earningsField]!;
+      all.push({
+        x: m.growthRate,
+        y: earnings,
         cipCode: m.cipCode,
         cipTitle: m.cipTitle,
-        category,
-        spread,
+        category: getCipCategory(m.cipCode),
+        median1yr: m.medianEarn1yr,
         median5yr: m.medianEarn5yr,
         growthRate: m.growthRate,
         schoolCount: m.schoolCount,
       });
-      if (m.medianEarn5yr < minX) minX = m.medianEarn5yr;
-      if (m.medianEarn5yr > maxX) maxX = m.medianEarn5yr;
-      if (spread < minY) minY = spread;
-      if (spread > maxY) maxY = spread;
+      if (m.growthRate < minX) minX = m.growthRate;
+      if (m.growthRate > maxX) maxX = m.growthRate;
+      if (earnings > maxY) maxY = earnings;
     }
-    const xPad = (maxX - minX) * 0.05 || 5000;
-    const yPad = (maxY - minY) * 0.1 || 5000;
+    const xLo = Math.min(0, minX);
+    const xHi = Math.max(0, maxX);
+    const xPad = (xHi - xLo) * 0.05 || 5;
     return {
-      categoryData: groups,
-      xDomain: [Math.max(0, minX - xPad), maxX + xPad] as [number, number],
-      yDomain: [Math.max(0, minY - yPad), maxY + yPad] as [number, number],
+      allChartData: all,
+      xDomain: [xLo - xPad, xHi + xPad] as [number, number],
+      yDomain: [0, 125000] as [number, number],
     };
-  }, [filtered]);
+  }, [majorsSummary, minSchools, earningsField]);
 
-  const hasScatterData = Object.keys(categoryData).length > 0;
+  // Split into dimmed (background) and highlighted (foreground) by category
+  // Compare selection takes priority; otherwise use search/category filter
+  const { dimmedData, highlightedByCategory } = useMemo(() => {
+    if (!hasActiveFilter) {
+      // No filter active — all points colored by category, nothing dimmed
+      const groups: Record<string, MajorScatterDatum[]> = {};
+      for (const d of allChartData) {
+        if (!groups[d.category]) groups[d.category] = [];
+        groups[d.category].push(d);
+      }
+      return { dimmedData: [] as MajorScatterDatum[], highlightedByCategory: groups };
+    }
+    // Compare takes priority over search/category
+    const highlightCodes = compareSet.size > 0
+      ? compareSet
+      : new Set(filtered.map((m) => m.cipCode));
+    const dimmed: MajorScatterDatum[] = [];
+    const groups: Record<string, MajorScatterDatum[]> = {};
+    for (const d of allChartData) {
+      if (highlightCodes.has(d.cipCode)) {
+        if (!groups[d.category]) groups[d.category] = [];
+        groups[d.category].push(d);
+      } else {
+        dimmed.push(d);
+      }
+    }
+    return { dimmedData: dimmed, highlightedByCategory: groups };
+  }, [allChartData, filtered, compareSet, hasActiveFilter]);
+
+  const hasScatterData = allChartData.length > 0;
 
   const handleDotClick = useCallback((data: any) => {
     const code = data?.cipCode ?? data?.payload?.cipCode;
     if (code != null) {
       trackEvent('major_click', { cipCode: code });
-      router.push(`/majors/${encodeURIComponent(code)}?from=majors`);
+      setSelectedMajor((prev) => (prev === code ? null : code));
     }
-  }, [router]);
+  }, []);
+
+  const selectedMajorData = useMemo(() => {
+    if (!selectedMajor) return null;
+    return allChartData.find((d) => d.cipCode === selectedMajor) ?? null;
+  }, [selectedMajor, allChartData]);
+
+  // Custom dot shape — highlights selected major
+  const renderDot = useCallback(
+    (props: any) => {
+      const { cx, cy, fill, payload } = props;
+      if (cx == null || cy == null) return <circle cx={0} cy={0} r={0} />;
+      const code = payload?.cipCode;
+      const isSelected = code != null && code === selectedMajor;
+      if (isSelected) {
+        return (
+          <g>
+            <circle cx={cx} cy={cy} r={14} fill={fill} opacity={0.12} />
+            <circle cx={cx} cy={cy} r={7} fill={fill} stroke="#1a1a1a" strokeWidth={2.5} />
+          </g>
+        );
+      }
+      return <circle cx={cx} cy={cy} r={5} fill={fill} opacity={0.75} />;
+    },
+    [selectedMajor],
+  );
+
+  const handleRowClick = useCallback((cipCode: string) => {
+    setSelectedMajor((prev) => (prev === cipCode ? null : cipCode));
+    chartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, []);
 
   // Reset page when filters change
   const handleSearchChange = useCallback((value: string) => {
@@ -237,8 +310,8 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
       <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <StatCard label="Total Majors" value={formatNumber(stats.total)} />
         <StatCard
-          label="Highest Earning Major"
-          value={stats.highest ? formatCurrency(stats.highest.medianEarn5yr) : '\u2014'}
+          label={`Highest Earning (${chartEarnings === 'earn1yr' ? '1yr' : '5yr'})`}
+          value={stats.highest ? formatCurrency(stats.highest[stats.highestEarnKey]) : '\u2014'}
           detail={stats.highest?.cipTitle.replace(/\.+$/, '')}
         />
         <StatCard
@@ -253,15 +326,44 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
         />
       </div>
 
-      {/* Scatter chart: 5yr Median Earnings vs Earnings Spread */}
+      {/* Scatter chart: Earnings vs Growth Rate */}
       {hasScatterData && (
         <div
+          ref={chartRef}
+          data-tour="scatter-chart"
           className="mb-6 rounded-lg border border-gray-100 bg-white p-2 shadow-sm sm:p-4"
           style={{ userSelect: 'none', WebkitTapHighlightColor: 'transparent' }}
           onMouseDown={(e) => {
             if ((e.target as HTMLElement).closest?.('svg')) e.preventDefault();
           }}
         >
+          <div className="mb-2 flex items-center justify-between px-2">
+            <span className="text-xs font-medium text-text-secondary">
+              Earnings vs Growth Rate
+            </span>
+            <div className="flex rounded-lg border border-gray-200 text-xs">
+              <button
+                onClick={() => setChartEarnings('earn1yr')}
+                className={`px-3 py-1.5 transition-colors rounded-l-lg ${
+                  chartEarnings === 'earn1yr'
+                    ? 'bg-accent text-white'
+                    : 'text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                1-Year
+              </button>
+              <button
+                onClick={() => setChartEarnings('earn5yr')}
+                className={`px-3 py-1.5 transition-colors rounded-r-lg ${
+                  chartEarnings === 'earn5yr'
+                    ? 'bg-accent text-white'
+                    : 'text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                5-Year
+              </button>
+            </div>
+          </div>
           <ResponsiveContainer width="100%" height={380}>
             <ScatterChart margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -269,29 +371,44 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
                 dataKey="x"
                 type="number"
                 domain={xDomain}
-                tickFormatter={(v: number) => formatCompact(v)}
-                tick={{ fontSize: 11, fill: '#6b7280' }}
-                label={{ value: 'Median 5yr Earnings', position: 'insideBottom', offset: -10, fontSize: 12, fill: '#6b7280' }}
+                tickFormatter={(v: number) => `${v > 0 ? '+' : ''}${Math.round(v)}%`}
+                tick={{ fontSize: 11, fill: '#475569' }}
+                label={{ value: 'Earnings Growth (1yr \u2192 5yr)', position: 'insideBottom', offset: -10, fontSize: 12, fill: '#475569' }}
               />
               <YAxis
                 dataKey="y"
                 type="number"
                 domain={yDomain}
+                ticks={[0, 25000, 50000, 75000, 100000, 125000]}
                 tickFormatter={(v: number) => formatCompact(v)}
-                tick={{ fontSize: 11, fill: '#6b7280' }}
+                tick={{ fontSize: 11, fill: '#475569' }}
                 width={60}
-                label={{ value: 'Earnings Spread (p75 \u2212 p25)', angle: -90, position: 'insideLeft', offset: 5, fontSize: 12, fill: '#6b7280' }}
+                label={{ value: chartEarnings === 'earn1yr' ? 'Median 1yr Earnings' : 'Median 5yr Earnings', angle: -90, position: 'insideLeft', offset: 5, fontSize: 12, fill: '#475569' }}
               />
               <Tooltip content={<MajorChartTooltip />} cursor={false} />
-              {CIP_CATEGORY_ORDER.map(
+              {/* Dimmed background points (non-matching when filter active) */}
+              {dimmedData.length > 0 && (
+                <Scatter
+                  name="Other"
+                  data={dimmedData}
+                  fill="#d1d5db"
+                  fillOpacity={0.3}
+                  shape={renderDot}
+                  onClick={handleDotClick}
+                  isAnimationActive={false}
+                />
+              )}
+              {/* Highlighted points by category — reverse so top categories render last (on top) */}
+              {[...CIP_CATEGORY_ORDER].reverse().map(
                 (cat) =>
-                  categoryData[cat] && (
+                  highlightedByCategory[cat] && (
                     <Scatter
                       key={cat}
                       name={cat}
-                      data={categoryData[cat]}
+                      data={highlightedByCategory[cat]}
                       fill={CIP_CATEGORY_COLORS[cat]}
                       fillOpacity={0.75}
+                      shape={renderDot}
                       onClick={handleDotClick}
                     />
                   ),
@@ -299,18 +416,82 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
             </ScatterChart>
           </ResponsiveContainer>
           <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1">
-            {CIP_CATEGORY_ORDER.map((cat) =>
-              categoryData[cat] ? (
-                <span key={cat} className="flex items-center gap-1.5 text-xs text-text-secondary">
+            {CIP_CATEGORY_ORDER.map((cat) => {
+              const hasHighlighted = !!highlightedByCategory[cat];
+              return (
+                <span
+                  key={cat}
+                  className={`flex items-center gap-1.5 text-xs ${hasHighlighted || !hasActiveFilter ? 'text-text-secondary' : 'text-text-secondary/40'}`}
+                >
                   <span
                     className="inline-block h-2.5 w-2.5 rounded-full"
-                    style={{ backgroundColor: CIP_CATEGORY_COLORS[cat] }}
+                    style={{
+                      backgroundColor: hasHighlighted || !hasActiveFilter
+                        ? CIP_CATEGORY_COLORS[cat]
+                        : '#d1d5db',
+                    }}
                   />
                   {cat}
                 </span>
-              ) : null,
-            )}
+              );
+            })}
           </div>
+
+          {/* Detail card — shown when a major dot is selected */}
+          {selectedMajorData && (
+            <div className="mt-3 rounded-lg border border-accent/30 bg-accent/5 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="inline-block h-3 w-3 flex-shrink-0 rounded-full"
+                      style={{ backgroundColor: CIP_CATEGORY_COLORS[selectedMajorData.category] ?? '#475569' }}
+                    />
+                    <span className="truncate text-base font-semibold text-text-primary">
+                      {selectedMajorData.cipTitle.replace(/\.+$/, '')}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-text-secondary">
+                    {selectedMajorData.category} &middot; {selectedMajorData.schoolCount} schools
+                  </p>
+                </div>
+                <button
+                  onClick={() => setSelectedMajor(null)}
+                  className="rounded-lg px-2 py-1 text-lg text-text-secondary hover:text-text-primary"
+                >
+                  &times;
+                </button>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Median 1yr</p>
+                  <p className="text-sm font-semibold text-earn-above">{formatCurrency(selectedMajorData.median1yr)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Median 5yr</p>
+                  <p className="text-sm font-semibold text-earn-above">{formatCurrency(selectedMajorData.median5yr)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Growth</p>
+                  <p className="text-sm font-semibold">
+                    {selectedMajorData.growthRate > 0 ? '+' : ''}{selectedMajorData.growthRate}%
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Schools</p>
+                  <p className="text-sm font-semibold">{selectedMajorData.schoolCount}</p>
+                </div>
+              </div>
+
+              <Link
+                href={`/majors/${encodeURIComponent(selectedMajorData.cipCode)}?from=majors`}
+                className="mt-3 inline-block text-xs font-medium text-accent hover:underline"
+              >
+                View major details &rarr;
+              </Link>
+            </div>
+          )}
         </div>
       )}
 
@@ -344,7 +525,7 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
                   <div className="mb-2 flex items-center gap-1.5">
                     <span
                       className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
-                      style={{ backgroundColor: CIP_CATEGORY_COLORS[category] ?? '#6b7280' }}
+                      style={{ backgroundColor: CIP_CATEGORY_COLORS[category] ?? '#475569' }}
                     />
                     <Link
                       href={`/majors/${encodeURIComponent(m.cipCode)}?from=majors`}
@@ -390,10 +571,33 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
         </div>
       )}
 
-      {/* Controls: search + min schools */}
-      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="text-xs font-medium text-text-secondary">
+      {/* Filters */}
+      <div className="mb-3 flex flex-wrap items-end gap-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
+        <div className="flex-1 sm:flex-none">
+          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-text-secondary">
+            Search Majors
+          </label>
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Major name..."
+              value={searchQuery}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 pr-7 text-xs text-text-primary outline-none placeholder:text-text-secondary/50 focus:border-accent sm:w-48"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => handleSearchChange('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-text-secondary hover:text-text-primary"
+              >
+                &times;
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-text-secondary">
             Category
           </label>
           <select
@@ -401,15 +605,18 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
             onChange={(e) => handleCategoryChange(e.target.value)}
             className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent"
           >
-            <option value="">All</option>
+            <option value="">All Categories</option>
             {CIP_CATEGORY_ORDER.map((cat) => (
               <option key={cat} value={cat}>
                 {cat}
               </option>
             ))}
           </select>
-          <label className="text-xs font-medium text-text-secondary">
-            Min schools
+        </div>
+
+        <div>
+          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-text-secondary">
+            Min Schools
           </label>
           <select
             value={minSchools}
@@ -422,33 +629,30 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
               </option>
             ))}
           </select>
-          <span className="text-xs text-text-secondary">
-            {filtered.length} of {majorsSummary.length} majors
-            {compareSet.size > 0 && (
-              <span className="ml-2 rounded-full bg-accent/10 px-2 py-0.5 text-accent">
-                {compareSet.size}/4 selected
-              </span>
-            )}
-          </span>
         </div>
-        <div className="relative">
-          <input
-            type="text"
-            placeholder="Search majors..."
-            value={searchQuery}
-            onChange={(e) => handleSearchChange(e.target.value)}
-            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 pr-7 text-xs text-text-primary outline-none placeholder:text-text-secondary/50 focus:border-accent sm:w-56"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => handleSearchChange('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-text-secondary hover:text-text-primary"
-            >
-              &times;
-            </button>
-          )}
-        </div>
+
+        {(searchQuery || categoryFilter) && (
+          <button
+            onClick={() => {
+              handleSearchChange('');
+              handleCategoryChange('');
+            }}
+            className="rounded-lg px-2 py-1.5 text-xs text-accent hover:bg-accent/10"
+          >
+            Clear filters
+          </button>
+        )}
       </div>
+
+      {/* Count */}
+      <p className="mb-2 text-xs text-text-secondary">
+        {filtered.length} of {majorsSummary.length} majors
+        {compareSet.size > 0 && (
+          <span className="ml-2 rounded-full bg-accent/10 px-2 py-0.5 text-accent">
+            {compareSet.size}/4 selected
+          </span>
+        )}
+      </p>
 
       <div className="overflow-x-auto rounded-lg border border-gray-100">
         <table className="w-full text-left">
@@ -501,8 +705,12 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
             {paginated.map((m, i) => (
               <tr
                 key={m.cipCode}
-                onClick={() => { trackEvent('major_click', { cipCode: m.cipCode }); router.push(`/majors/${encodeURIComponent(m.cipCode)}?from=majors`); }}
-                className="cursor-pointer border-b border-gray-50 transition-colors hover:bg-gray-50"
+                onClick={() => handleRowClick(m.cipCode)}
+                className={`cursor-pointer border-b border-gray-50 transition-colors ${
+                  selectedMajor === m.cipCode
+                    ? 'bg-accent/10'
+                    : 'hover:bg-gray-50'
+                }`}
               >
                 <td
                   className="w-10 px-2 py-2.5"
@@ -519,9 +727,20 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
                 <td className="px-3 py-2.5 text-right text-xs tabular-nums text-text-secondary w-10">
                   {(currentPage - 1) * PAGE_SIZE + i + 1}
                 </td>
-                <td className="px-3 py-2.5 text-sm font-medium text-text-primary">
-                  {m.cipTitle.replace(/\.+$/, '')}
-                  <span className="ml-2 text-xs text-accent">&rarr;</span>
+                <td className="px-3 py-2.5 text-sm">
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      className="inline-block h-2 w-2 flex-shrink-0 rounded-full"
+                      style={{ backgroundColor: CIP_CATEGORY_COLORS[getCipCategory(m.cipCode)] ?? '#475569' }}
+                    />
+                    <Link
+                      href={`/majors/${encodeURIComponent(m.cipCode)}?from=majors`}
+                      className="font-medium text-accent hover:underline"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {m.cipTitle.replace(/\.+$/, '')}
+                    </Link>
+                  </span>
                 </td>
                 <td className="px-3 py-2.5 text-right text-sm tabular-nums text-text-primary">
                   {formatCurrency(m.medianEarn5yr)}

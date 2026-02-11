@@ -1,26 +1,62 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import type { School, ProgramRecord, SortDir } from '@/types';
-import { formatCurrency, formatRate, formatNumber, formatCompact } from '@/lib/formatters';
 import {
-  BarChart,
-  Bar,
+  ScatterChart,
+  Scatter,
   XAxis,
   YAxis,
-  Tooltip as RechartsTooltip,
+  Tooltip,
+  CartesianGrid,
   ResponsiveContainer,
-  Legend,
+  ReferenceLine,
 } from 'recharts';
+import type { School, ProgramRecord, SortDir } from '@/types';
+import { formatCurrency, formatRate, formatNumber, formatCompact } from '@/lib/formatters';
 import { getDisplayTier, TIER_COLORS } from '@/lib/tiers';
 import { generateSchoolDescription } from '@/lib/descriptions';
+import { getCipCategory, CIP_CATEGORY_COLORS, CIP_CATEGORY_ORDER } from '@/lib/cip-categories';
 import StatCard from './StatCard';
 import ShareButton from './ShareButton';
 
 type SortField = 'cipTitle' | 'earn1yr' | 'earn5yr' | 'costAttendance' | 'multiple' | 'credTitle';
 
 const PAGE_SIZE = 25;
+
+interface DotDatum {
+  x: number;
+  y: number;
+  progKey: string;
+  cipCode: string;
+  cipTitle: string;
+  credTitle: string;
+  category: string;
+  earn1yr: number | null;
+  earn5yr: number | null;
+}
+
+function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: DotDatum }> }) {
+  if (!active || !payload?.[0]) return null;
+  const d = payload[0].payload;
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-lg">
+      <p className="text-sm font-semibold text-text-primary">{d.cipTitle.replace(/\.+$/, '')}</p>
+      <p className="text-xs text-text-secondary">{d.credTitle}</p>
+      <div className="mt-1.5 flex gap-4 text-xs">
+        <span>1yr: <strong className="text-earn-above">{d.earn1yr != null ? formatCurrency(d.earn1yr) : '\u2014'}</strong></span>
+        <span>5yr: <strong className="text-earn-above">{d.earn5yr != null ? formatCurrency(d.earn5yr) : '\u2014'}</strong></span>
+      </div>
+      <span
+        className="mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium text-white"
+        style={{ backgroundColor: CIP_CATEGORY_COLORS[d.category] ?? '#475569' }}
+      >
+        {d.category}
+      </span>
+      <p className="mt-1.5 text-[10px] text-text-secondary">Click to see details</p>
+    </div>
+  );
+}
 
 interface SchoolDetailProps {
   school: School;
@@ -30,10 +66,12 @@ interface SchoolDetailProps {
 
 interface ProgramRow {
   rank: number;
+  progKey: string;
   cipCode: string;
   cipTitle: string;
   credLevel: number;
   credTitle: string;
+  category: string;
   earn1yr: number | null;
   earn5yr: number | null;
   costAttendance: number | null;
@@ -47,13 +85,24 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
   const [searchQuery, setSearchQuery] = useState('');
   const [credFilter, setCredFilter] = useState('');
   const [page, setPage] = useState(1);
-  const [earningsView, setEarningsView] = useState<'earn1yr' | 'earn5yr' | 'overlay'>('earn1yr');
+  const [selectedProgram, setSelectedProgram] = useState<string | null>(null);
+  const [compareSet, setCompareSet] = useState<Set<string>>(new Set());
+  const chartRef = useRef<HTMLDivElement>(null);
 
-  const tier = getDisplayTier(school.name, school.selectivityTier);
+  const tier = getDisplayTier(school.name, school.selectivityTier, school.admissionRate, school.size);
   const satCombined =
     school.satMath75 != null && school.satRead75 != null
       ? school.satMath75 + school.satRead75
       : null;
+
+  // Close detail card on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedProgram(null);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // Build rows from programs
   const allRows = useMemo(() => {
@@ -61,10 +110,12 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
       .filter((p) => p.earn1yr != null || p.earn5yr != null)
       .map((p) => ({
         rank: 0,
+        progKey: `${p.cipCode}-${p.credLevel}`,
         cipCode: p.cipCode,
         cipTitle: p.cipTitle,
         credLevel: p.credLevel,
         credTitle: p.credTitle,
+        category: getCipCategory(p.cipCode),
         earn1yr: p.earn1yr,
         earn5yr: p.earn5yr,
         costAttendance: p.costAttendance,
@@ -97,6 +148,126 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
     }
     return rows;
   }, [allRows, searchQuery, credFilter]);
+
+  // Static axes — symmetric since both axes are earnings
+  const { xDomain, yDomain, xTicks, yTicks } = useMemo(() => {
+    let maxVal = 0;
+    for (const r of allRows) {
+      if (r.earn1yr != null && r.earn1yr > maxVal) maxVal = r.earn1yr;
+      if (r.earn5yr != null && r.earn5yr > maxVal) maxVal = r.earn5yr;
+    }
+    const axisMax = Math.max(75000, Math.ceil(maxVal / 25000) * 25000);
+    const ticks = Array.from({ length: axisMax / 25000 + 1 }, (_, i) => i * 25000);
+    return {
+      xDomain: [0, axisMax] as [number, number],
+      yDomain: [0, axisMax] as [number, number],
+      xTicks: ticks,
+      yTicks: ticks,
+    };
+  }, [allRows]);
+
+  // Chart data — plot on both axes when available, or on the axis with data
+  const allChartData = useMemo(() => {
+    const data: DotDatum[] = [];
+    for (const r of allRows) {
+      if (r.earn1yr == null && r.earn5yr == null) continue;
+      data.push({
+        x: r.earn1yr ?? 0,
+        y: r.earn5yr ?? 0,
+        progKey: r.progKey,
+        cipCode: r.cipCode,
+        cipTitle: r.cipTitle,
+        credTitle: r.credTitle,
+        category: r.category,
+        earn1yr: r.earn1yr,
+        earn5yr: r.earn5yr,
+      });
+    }
+    return data;
+  }, [allRows]);
+
+  // Dim/highlight based on filters
+  const hasActiveFilter = !!(searchQuery.trim() || credFilter || compareSet.size > 0);
+
+  const { dimmedData, highlightedByCategory } = useMemo(() => {
+    if (!hasActiveFilter) {
+      const groups: Record<string, DotDatum[]> = {};
+      for (const d of allChartData) {
+        if (!groups[d.category]) groups[d.category] = [];
+        groups[d.category].push(d);
+      }
+      return { dimmedData: [] as DotDatum[], highlightedByCategory: groups };
+    }
+    const highlightKeys = compareSet.size > 0
+      ? compareSet
+      : new Set(filtered.map((r) => r.progKey));
+    const dimmed: DotDatum[] = [];
+    const groups: Record<string, DotDatum[]> = {};
+    for (const d of allChartData) {
+      if (highlightKeys.has(d.progKey)) {
+        if (!groups[d.category]) groups[d.category] = [];
+        groups[d.category].push(d);
+      } else {
+        dimmed.push(d);
+      }
+    }
+    return { dimmedData: dimmed, highlightedByCategory: groups };
+  }, [allChartData, filtered, compareSet, hasActiveFilter]);
+
+  const hasScatterData = allChartData.length > 0;
+
+  const handleDotClick = useCallback((data: any) => {
+    const key = data?.progKey ?? data?.payload?.progKey;
+    if (key != null) {
+      setSelectedProgram((prev) => (prev === key ? null : key));
+    }
+  }, []);
+
+  const selectedRow = useMemo(() => {
+    if (selectedProgram == null) return null;
+    return allRows.find((r) => r.progKey === selectedProgram) ?? null;
+  }, [selectedProgram, allRows]);
+
+  const renderDot = useCallback(
+    (props: any) => {
+      const { cx, cy, fill, payload } = props;
+      if (cx == null || cy == null) return <circle cx={0} cy={0} r={0} />;
+      const key = payload?.progKey;
+      const isSelected = key != null && key === selectedProgram;
+      if (isSelected) {
+        return (
+          <g>
+            <circle cx={cx} cy={cy} r={14} fill={fill} opacity={0.12} />
+            <circle cx={cx} cy={cy} r={7} fill={fill} stroke="#1a1a1a" strokeWidth={2.5} />
+          </g>
+        );
+      }
+      return <circle cx={cx} cy={cy} r={5} fill={fill} opacity={0.75} />;
+    },
+    [selectedProgram],
+  );
+
+  const handleRowClick = useCallback((progKey: string) => {
+    setSelectedProgram((prev) => (prev === progKey ? null : progKey));
+    chartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, []);
+
+  const handleCompareToggle = useCallback((progKey: string) => {
+    setCompareSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(progKey)) {
+        next.delete(progKey);
+      } else if (next.size < 4) {
+        next.add(progKey);
+      }
+      return next;
+    });
+  }, []);
+
+  const comparedPrograms = useMemo(() => {
+    if (compareSet.size === 0) return [];
+    return allRows.filter((r) => compareSet.has(r.progKey));
+  }, [allRows, compareSet]);
 
   // Sort
   const sorted = useMemo(() => {
@@ -158,26 +329,6 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
   }, [currentPage, totalPages]);
 
   const filtersActive = !!(searchQuery || credFilter);
-
-  // Bar chart data — sorted by active earnings, top 20
-  const chartData = useMemo(() => {
-    const sortKey = earningsView === 'earn5yr' ? 'earn5yr' : 'earn1yr';
-    return [...filtered]
-      .filter((r) => r[sortKey] != null)
-      .sort((a, b) => (b[sortKey] ?? 0) - (a[sortKey] ?? 0))
-      .slice(0, 20)
-      .map((r) => {
-        const title = r.cipTitle.replace(/\.+$/, '');
-        return {
-        name: title.length > 30 ? title.slice(0, 28) + '...' : title,
-        fullName: title,
-        earn1yr: r.earn1yr ?? 0,
-        earn5yr: r.earn5yr ?? 0,
-      };
-      });
-  }, [filtered, earningsView]);
-
-  const chartHeight = Math.max(200, chartData.length * 30 + 60);
 
   return (
     <div>
@@ -245,107 +396,247 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
         />
       </div>
 
-      {/* Earnings bar chart */}
-      {chartData.length > 0 && (
+      {/* Scatter chart: 1yr vs 5yr earnings */}
+      {hasScatterData && (
+        <div
+          ref={chartRef}
+          className="mt-6 rounded-lg border border-gray-100 bg-white p-2 shadow-sm sm:p-4"
+          style={{ userSelect: 'none', WebkitTapHighlightColor: 'transparent' }}
+          onMouseDown={(e) => {
+            if ((e.target as HTMLElement).closest?.('svg')) e.preventDefault();
+          }}
+        >
+          <h3 className="mb-2 px-2 text-sm font-semibold text-text-primary">
+            1-Year vs 5-Year Earnings &mdash; {allChartData.length} Programs
+          </h3>
+          <ResponsiveContainer width="100%" height={420}>
+            <ScatterChart margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis
+                dataKey="x"
+                type="number"
+                name="1yr Earnings"
+                domain={xDomain}
+                ticks={xTicks}
+                tickFormatter={(v: number) => formatCompact(v)}
+                tick={{ fontSize: 11, fill: '#475569' }}
+                label={{
+                  value: '1-Year Earnings',
+                  position: 'insideBottom',
+                  offset: -10,
+                  fontSize: 12,
+                  fill: '#475569',
+                }}
+              />
+              <YAxis
+                dataKey="y"
+                type="number"
+                name="5yr Earnings"
+                domain={yDomain}
+                ticks={yTicks}
+                tickFormatter={(v: number) => formatCompact(v)}
+                tick={{ fontSize: 11, fill: '#475569' }}
+                width={60}
+                label={{
+                  value: '5-Year Earnings',
+                  angle: -90,
+                  position: 'insideLeft',
+                  offset: 5,
+                  fontSize: 12,
+                  fill: '#475569',
+                }}
+              />
+              <Tooltip content={<ChartTooltip />} cursor={false} />
+              {school.costAttendance != null && school.costAttendance > 0 && (
+                <>
+                  <ReferenceLine
+                    segment={[{ x: school.costAttendance, y: 0 }, { x: school.costAttendance, y: school.costAttendance }]}
+                    stroke="#ef4444"
+                    strokeDasharray="6 4"
+                    strokeWidth={1.5}
+                    strokeOpacity={0.6}
+                  />
+                  <ReferenceLine
+                    segment={[{ x: 0, y: school.costAttendance }, { x: school.costAttendance, y: school.costAttendance }]}
+                    stroke="#ef4444"
+                    strokeDasharray="6 4"
+                    strokeWidth={1.5}
+                    strokeOpacity={0.6}
+                  />
+                </>
+              )}
+              {/* Dimmed background points (non-matching when filter active) */}
+              {dimmedData.length > 0 && (
+                <Scatter
+                  name="Other"
+                  data={dimmedData}
+                  fill="#d1d5db"
+                  fillOpacity={0.3}
+                  shape={renderDot}
+                  onClick={handleDotClick}
+                  isAnimationActive={false}
+                />
+              )}
+              {/* Highlighted points by CIP category — reverse so top categories render last (on top) */}
+              {[...CIP_CATEGORY_ORDER].reverse().map(
+                (cat) =>
+                  highlightedByCategory[cat] && (
+                    <Scatter
+                      key={cat}
+                      name={cat}
+                      data={highlightedByCategory[cat]}
+                      fill={CIP_CATEGORY_COLORS[cat]}
+                      fillOpacity={0.75}
+                      shape={renderDot}
+                      onClick={handleDotClick}
+                    />
+                  ),
+              )}
+            </ScatterChart>
+          </ResponsiveContainer>
+          <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1">
+            {CIP_CATEGORY_ORDER.map((cat) => {
+              const hasHighlighted = !!highlightedByCategory[cat];
+              return (
+                <span
+                  key={cat}
+                  className={`flex items-center gap-1.5 text-xs ${hasHighlighted || !hasActiveFilter ? 'text-text-secondary' : 'text-text-secondary/40'}`}
+                >
+                  <span
+                    className="inline-block h-2.5 w-2.5 rounded-full"
+                    style={{
+                      backgroundColor: hasHighlighted || !hasActiveFilter
+                        ? CIP_CATEGORY_COLORS[cat]
+                        : '#d1d5db',
+                    }}
+                  />
+                  {cat}
+                </span>
+              );
+            })}
+            {school.costAttendance != null && school.costAttendance > 0 && (
+              <span className="flex items-center gap-1.5 text-xs text-text-secondary">
+                <span className="inline-block h-0 w-4 border-t-[1.5px] border-dashed" style={{ borderColor: '#ef4444', opacity: 0.6 }} />
+                Cost ({formatCompact(school.costAttendance)})
+              </span>
+            )}
+          </div>
+
+          {/* Detail card — shown when a program dot is selected */}
+          {selectedRow && (
+            <div className="mt-3 rounded-lg border border-accent/30 bg-accent/5 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="inline-block h-3 w-3 flex-shrink-0 rounded-full"
+                      style={{ backgroundColor: CIP_CATEGORY_COLORS[selectedRow.category] ?? '#475569' }}
+                    />
+                    <span className="truncate text-base font-semibold text-text-primary">
+                      {selectedRow.cipTitle.replace(/\.+$/, '')}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-text-secondary">
+                    {selectedRow.credTitle} &middot; {selectedRow.category}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setSelectedProgram(null)}
+                  className="rounded-lg px-2 py-1 text-lg text-text-secondary hover:text-text-primary"
+                >
+                  &times;
+                </button>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">1yr Earnings</p>
+                  <p className="text-sm font-semibold text-earn-above">{formatCurrency(selectedRow.earn1yr)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">5yr Earnings</p>
+                  <p className="text-sm font-semibold text-earn-above">
+                    {selectedRow.earn5yr != null ? formatCurrency(selectedRow.earn5yr) : '\u2014'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Cost</p>
+                  <p className="text-sm font-semibold">
+                    {selectedRow.costAttendance != null && selectedRow.costAttendance > 0
+                      ? formatCurrency(selectedRow.costAttendance) : '\u2014'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">ROI</p>
+                  <p className="text-sm font-semibold">
+                    {selectedRow.multiple > 0 ? selectedRow.multiple.toFixed(1) + 'x' : '\u2014'}
+                  </p>
+                </div>
+              </div>
+
+              <Link
+                href={`/majors/${encodeURIComponent(selectedRow.cipCode)}?from=colleges`}
+                className="mt-3 inline-block text-xs font-medium text-accent hover:underline"
+              >
+                View major details &rarr;
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Comparison panel */}
+      {comparedPrograms.length >= 2 && (
         <div className="mt-6 rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-text-primary">
-              Earnings by Program
+              Comparing {comparedPrograms.length} Programs
             </h3>
-            <div className="flex rounded-lg border border-gray-200 text-xs">
-              <button
-                onClick={() => setEarningsView('earn1yr')}
-                className={`px-2.5 py-1.5 transition-colors rounded-l-lg ${
-                  earningsView === 'earn1yr'
-                    ? 'bg-accent text-white'
-                    : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                1-Year
-              </button>
-              <button
-                onClick={() => setEarningsView('earn5yr')}
-                className={`px-2.5 py-1.5 transition-colors ${
-                  earningsView === 'earn5yr'
-                    ? 'bg-accent text-white'
-                    : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                5-Year
-              </button>
-              <button
-                onClick={() => setEarningsView('overlay')}
-                className={`px-2.5 py-1.5 transition-colors rounded-r-lg ${
-                  earningsView === 'overlay'
-                    ? 'bg-accent text-white'
-                    : 'text-text-secondary hover:text-text-primary'
-                }`}
-              >
-                Overlay
-              </button>
-            </div>
-          </div>
-          <ResponsiveContainer width="100%" height={chartHeight}>
-            <BarChart
-              data={chartData}
-              layout="vertical"
-              margin={{ top: 0, right: 20, bottom: 0, left: 10 }}
+            <button
+              onClick={() => setCompareSet(new Set())}
+              className="text-xs text-accent hover:underline"
             >
-              <XAxis
-                type="number"
-                tickFormatter={(v: number) => formatCompact(v)}
-                tick={{ fontSize: 11, fill: '#6b7280' }}
-              />
-              <YAxis
-                type="category"
-                dataKey="name"
-                width={160}
-                tick={{ fontSize: 11, fill: '#374151' }}
-              />
-              <RechartsTooltip
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                formatter={(value: any, name: any) => [
-                  formatCurrency(value ?? null),
-                  name === 'earn1yr' ? '1-Year' : '5-Year',
-                ]}
-                labelFormatter={(label) => {
-                  const item = chartData.find((d) => d.name === label);
-                  return item?.fullName ?? String(label);
-                }}
-              />
-              {earningsView === 'overlay' && (
-                <Legend
-                  wrapperStyle={{ fontSize: 11 }}
-                  iconType="square"
-                  iconSize={10}
-                  formatter={(value: any) => <span style={{ color: '#1f2937' }}>{value}</span>}
-                />
-              )}
-              {(earningsView === 'earn1yr' || earningsView === 'overlay') && (
-                <Bar
-                  dataKey="earn1yr"
-                  name="1-Year"
-                  fill="#1e3a5f"
-                  radius={[0, 4, 4, 0]}
-                  barSize={earningsView === 'overlay' ? 12 : 18}
-                />
-              )}
-              {(earningsView === 'earn5yr' || earningsView === 'overlay') && (
-                <Bar
-                  dataKey="earn5yr"
-                  name="5-Year"
-                  fill={earningsView === 'overlay' ? '#8f9db0' : '#1e3a5f'}
-                  radius={[0, 4, 4, 0]}
-                  barSize={earningsView === 'overlay' ? 12 : 18}
-                />
-              )}
-            </BarChart>
-          </ResponsiveContainer>
-          {filtered.length > 20 && (
-            <p className="mt-2 text-xs text-text-secondary">
-              Showing top 20 of {filtered.length} programs
-            </p>
-          )}
+              Clear
+            </button>
+          </div>
+          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${comparedPrograms.length}, 1fr)` }}>
+            {comparedPrograms.map((r) => (
+              <div key={r.progKey} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                    style={{ backgroundColor: CIP_CATEGORY_COLORS[r.category] ?? '#475569' }}
+                  />
+                  <span className="truncate text-xs font-semibold text-text-primary">
+                    {r.cipTitle.replace(/\.+$/, '')}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[10px] text-text-secondary">{r.credTitle} &middot; {r.category}</p>
+                <div className="mt-2 space-y-1 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">1yr Earnings</span>
+                    <span className="font-medium text-earn-above">{formatCurrency(r.earn1yr)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">5yr Earnings</span>
+                    <span className="font-medium text-earn-above">
+                      {r.earn5yr != null ? formatCurrency(r.earn5yr) : '\u2014'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">Cost</span>
+                    <span className="font-medium">
+                      {r.costAttendance != null && r.costAttendance > 0 ? formatCurrency(r.costAttendance) : '\u2014'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">ROI</span>
+                    <span className="font-semibold">{r.multiple > 0 ? r.multiple.toFixed(1) + 'x' : '\u2014'}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -421,6 +712,9 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
         <table className="w-full text-xs">
           <thead className="border-b border-gray-100 bg-gray-50 text-left">
             <tr>
+              <th className="w-8 px-2 py-2 text-center font-medium text-text-secondary">
+                <span className="sr-only">Compare</span>
+              </th>
               <th className="px-3 py-2 font-medium text-text-secondary">#</th>
               <th
                 className="cursor-pointer px-3 py-2 font-medium text-text-secondary hover:text-text-primary"
@@ -463,19 +757,42 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
           <tbody>
             {paginated.map((r) => (
               <tr
-                key={`${r.cipCode}-${r.credLevel}`}
-                className="border-t border-gray-50 transition-colors hover:bg-gray-50"
+                key={r.progKey}
+                onClick={() => handleRowClick(r.progKey)}
+                className={`cursor-pointer border-t border-gray-50 transition-colors ${
+                  selectedProgram === r.progKey
+                    ? 'bg-accent/10'
+                    : compareSet.has(r.progKey)
+                      ? 'bg-accent/5'
+                      : 'hover:bg-gray-50'
+                }`}
               >
+                <td className="w-8 px-2 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={compareSet.has(r.progKey)}
+                    disabled={!compareSet.has(r.progKey) && compareSet.size >= 4}
+                    onChange={() => handleCompareToggle(r.progKey)}
+                    className="h-3.5 w-3.5 rounded border-gray-300 text-accent accent-accent"
+                  />
+                </td>
                 <td className="px-3 py-2 text-text-secondary">{r.rank}</td>
                 <td className="px-3 py-2">
-                  <Link
-                    href={`/majors/${encodeURIComponent(r.cipCode)}`}
-                    className="font-medium text-accent hover:underline"
-                  >
-                    {r.cipTitle.replace(/\.+$/, '')}
-                  </Link>
-                  <span className="ml-1.5 text-text-secondary sm:hidden">
-                    {r.credTitle}
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      className="inline-block h-2 w-2 flex-shrink-0 rounded-full"
+                      style={{ backgroundColor: CIP_CATEGORY_COLORS[r.category] ?? '#475569' }}
+                    />
+                    <Link
+                      href={`/majors/${encodeURIComponent(r.cipCode)}?from=colleges`}
+                      className="font-medium text-accent hover:underline"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {r.cipTitle.replace(/\.+$/, '')}
+                    </Link>
+                    <span className="text-text-secondary sm:hidden">
+                      {r.credTitle}
+                    </span>
                   </span>
                 </td>
                 <td className="hidden px-3 py-2 text-text-secondary sm:table-cell">
@@ -500,7 +817,7 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
             {paginated.length === 0 && (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="px-3 py-8 text-center text-sm text-text-secondary"
                 >
                   No programs match your filters

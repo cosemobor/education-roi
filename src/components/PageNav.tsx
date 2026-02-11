@@ -5,9 +5,8 @@ import { usePathname } from 'next/navigation';
 import type { ViewTab } from '@/types';
 
 const TABS: { key: ViewTab; label: string }[] = [
-  { key: 'explorer', label: 'College x Major' },
-  { key: 'colleges', label: 'Colleges' },
   { key: 'majors', label: 'Majors' },
+  { key: 'colleges', label: 'Colleges' },
 ];
 
 interface PageNavProps {
