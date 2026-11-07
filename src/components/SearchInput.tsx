@@ -2,7 +2,6 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import Fuse, { type FuseOptionKey } from 'fuse.js';
-import { trackSearchQuery, trackEvent } from '@/lib/analytics';
 
 export interface SearchOption {
   id: string;
@@ -133,7 +132,6 @@ export default function SearchInput({
 
   const handleSelect = useCallback(
     (option: SearchOption) => {
-      trackEvent('search_select', { id: option.id, label: option.label, group: option.group ?? '' });
       onChange(option);
       setQuery(option.label);
       setIsOpen(false);
@@ -187,7 +185,6 @@ export default function SearchInput({
         onChange={(e) => {
           setQuery(e.target.value);
           setIsOpen(true);
-          if (e.target.value.trim()) trackSearchQuery(e.target.value);
           if (value) onChange(null);
         }}
         onFocus={() => {

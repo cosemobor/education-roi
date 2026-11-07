@@ -11,7 +11,6 @@ import StatCard from './StatCard';
 import SortableHeader from './SortableHeader';
 import { formatCurrency, formatCompact, formatPercent, formatNumber } from '@/lib/formatters';
 import { getCipCategory, CIP_CATEGORY_COLORS, CIP_CATEGORY_ORDER } from '@/lib/cip-categories';
-import { trackEvent } from '@/lib/analytics';
 
 interface MajorScatterDatum {
   x: number;
@@ -245,7 +244,6 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
     const code = data?.cipCode ?? data?.payload?.cipCode;
     if (code != null) {
       dotClickedRef.current = true;
-      trackEvent('major_click', { cipCode: code });
       setSelectedMajor((prev) => (prev === code ? null : code));
     }
   }, []);

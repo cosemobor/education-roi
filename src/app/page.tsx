@@ -1,20 +1,14 @@
 import { Suspense } from 'react';
-import { getDb } from '@/lib/db';
-import { majorsSummary, schoolRankings } from '@/lib/db/schema';
-import { desc } from 'drizzle-orm';
+import { majorsSummary, schoolRankings } from '@/lib/data/store';
 import type { MajorSummary, SchoolRanking } from '@/types';
 import AppShell from './AppShell';
 
-export const revalidate = 3600; // Re-generate at most once per hour
+// Static: data is bundled at build time (src/data/), no database.
 
-export default async function Home() {
-  const db = getDb();
+export default function Home() {
 
   // Fetch majors summary (~800 rows)
-  const majorsRows = await db
-    .select()
-    .from(majorsSummary)
-    .orderBy(desc(majorsSummary.medianEarn1yr));
+  const majorsRows = majorsSummary;
 
   const majorsData: MajorSummary[] = majorsRows.map((r) => ({
     cipCode: r.cipCode,
@@ -31,10 +25,7 @@ export default async function Home() {
   }));
 
   // Fetch pre-computed school rankings (~4000 rows)
-  const schoolRows = await db
-    .select()
-    .from(schoolRankings)
-    .orderBy(desc(schoolRankings.weightedEarn1yr));
+  const schoolRows = schoolRankings;
 
   const schoolData: SchoolRanking[] = schoolRows.map((r) => ({
     unitId: r.unitId,

@@ -1,12 +1,10 @@
 import type { Metadata } from 'next';
-import { getDb } from '@/lib/db';
-import { programs, schools } from '@/lib/db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { getPrograms, getSchool } from '@/lib/data/store';
 import type { School, ProgramRecord } from '@/types';
 import SchoolDetail from '@/components/SchoolDetail';
 import PageNav from '@/components/PageNav';
 
-export const revalidate = 3600;
+// Rendered per request (reads ?from=) from bundled in-memory data — no database.
 
 interface PageProps {
   params: Promise<{ unitId: string }>;
@@ -18,12 +16,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const unitId = parseInt(raw, 10);
   if (isNaN(unitId)) return { title: 'Invalid School' };
 
-  const db = getDb();
-  const [row] = await db
-    .select({ name: schools.name, city: schools.city, state: schools.state })
-    .from(schools)
-    .where(eq(schools.unitId, unitId))
-    .limit(1);
+  const row = getSchool(unitId);
 
   if (!row) return { title: 'School Not Found' };
 
@@ -51,13 +44,7 @@ export default async function SchoolPage({ params, searchParams }: PageProps) {
     );
   }
 
-  const db = getDb();
-
-  const [schoolRow] = await db
-    .select()
-    .from(schools)
-    .where(eq(schools.unitId, unitId))
-    .limit(1);
+  const schoolRow = getSchool(unitId);
 
   if (!schoolRow) {
     return (
@@ -92,27 +79,7 @@ export default async function SchoolPage({ params, searchParams }: PageProps) {
     lon: schoolRow.lon,
   };
 
-  const rows = await db
-    .select({
-      id: programs.id,
-      unitId: programs.unitId,
-      schoolName: programs.schoolName,
-      state: programs.state,
-      cipCode: programs.cipCode,
-      cipTitle: programs.cipTitle,
-      credLevel: programs.credLevel,
-      credTitle: programs.credTitle,
-      earn1yr: programs.earn1yr,
-      earn4yr: programs.earn4yr,
-      earn5yr: programs.earn5yr,
-      earn1yrCount: programs.earn1yrCount,
-      earn5yrCount: programs.earn5yrCount,
-      costAttendance: programs.costAttendance,
-      selectivityTier: programs.selectivityTier,
-    })
-    .from(programs)
-    .where(eq(programs.unitId, unitId))
-    .orderBy(desc(programs.earn1yr));
+  const rows = getPrograms({ unitId });
 
   const programData: ProgramRecord[] = rows.map((r) => ({
     unitId: r.unitId,

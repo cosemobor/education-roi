@@ -9,7 +9,6 @@ import {
 import type { SchoolRanking, SortDir } from '@/types';
 import { formatCurrency, formatCompact, formatRate, formatNumber } from '@/lib/formatters';
 import { getDisplayTier, TIER_COLORS, TIER_ORDER } from '@/lib/tiers';
-import { trackEvent } from '@/lib/analytics';
 import StatCard from './StatCard';
 import SortableHeader from './SortableHeader';
 
@@ -290,7 +289,6 @@ export default function CollegeRankings({
     const uid = data?.unitId ?? data?.payload?.unitId;
     if (uid != null) {
       dotClickedRef.current = true;
-      trackEvent('school_click', { unitId: uid });
       setSelectedSchool((prev) => (prev === uid ? null : uid));
     }
   }, []);

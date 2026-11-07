@@ -1,12 +1,10 @@
 import type { Metadata } from 'next';
-import { getDb } from '@/lib/db';
-import { programs, schools, majorsSummary } from '@/lib/db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { getMajor, getPrograms, getSchool } from '@/lib/data/store';
 import type { MajorSummary, ProgramRecord } from '@/types';
 import MajorDetail from '@/components/MajorDetail';
 import PageNav from '@/components/PageNav';
 
-export const revalidate = 3600;
+// Rendered per request (reads ?from=) from bundled in-memory data — no database.
 
 interface PageProps {
   params: Promise<{ cipCode: string }>;
@@ -15,12 +13,7 @@ interface PageProps {
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { cipCode } = await params;
-  const db = getDb();
-  const [row] = await db
-    .select({ cipTitle: majorsSummary.cipTitle, medianEarn1yr: majorsSummary.medianEarn1yr })
-    .from(majorsSummary)
-    .where(eq(majorsSummary.cipCode, cipCode))
-    .limit(1);
+  const row = getMajor(cipCode);
 
   if (!row) return { title: 'Major Not Found' };
 
@@ -39,14 +32,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 export default async function MajorPage({ params, searchParams }: PageProps) {
   const { cipCode } = await params;
   const { from: fromTab } = await searchParams;
-  const db = getDb();
-
-  // Fetch major summary
-  const [majorRow] = await db
-    .select()
-    .from(majorsSummary)
-    .where(eq(majorsSummary.cipCode, cipCode))
-    .limit(1);
+  const majorRow = getMajor(cipCode);
 
   if (!majorRow) {
     return (
@@ -74,34 +60,19 @@ export default async function MajorPage({ params, searchParams }: PageProps) {
   };
 
   // Fetch all programs for this major with school data
-  const rows = await db
-    .select({
-      unitId: programs.unitId,
-      schoolName: programs.schoolName,
-      state: programs.state,
-      cipCode: programs.cipCode,
-      cipTitle: programs.cipTitle,
-      credLevel: programs.credLevel,
-      credTitle: programs.credTitle,
-      earn1yr: programs.earn1yr,
-      earn4yr: programs.earn4yr,
-      earn5yr: programs.earn5yr,
-      earn1yrCount: programs.earn1yrCount,
-      earn5yrCount: programs.earn5yrCount,
-      costAttendance: programs.costAttendance,
-      selectivityTier: programs.selectivityTier,
-      ownership: schools.ownership,
-      ownershipLabel: schools.ownershipLabel,
-      admissionRate: schools.admissionRate,
-      satMath75: schools.satMath75,
-      satRead75: schools.satRead75,
-      size: schools.size,
-      completionRate: schools.completionRate,
-    })
-    .from(programs)
-    .leftJoin(schools, eq(programs.unitId, schools.unitId))
-    .where(eq(programs.cipCode, cipCode))
-    .orderBy(desc(programs.earn1yr));
+  const rows = getPrograms({ cip: cipCode }).map((p) => {
+    const sch = getSchool(p.unitId);
+    return {
+      ...p,
+      ownership: sch?.ownership ?? null,
+      ownershipLabel: sch?.ownershipLabel ?? null,
+      admissionRate: sch?.admissionRate ?? null,
+      satMath75: sch?.satMath75 ?? null,
+      satRead75: sch?.satRead75 ?? null,
+      size: sch?.size ?? null,
+      completionRate: sch?.completionRate ?? null,
+    };
+  });
 
   const programData: ProgramRecord[] = rows.map((r) => ({
     unitId: r.unitId,

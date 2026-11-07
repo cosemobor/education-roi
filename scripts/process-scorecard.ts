@@ -5,13 +5,15 @@
  *   npx tsx scripts/process-scorecard.ts
  *
  * Reads:  data/raw-institutions.json, data/raw-programs.json
- * Writes: data/programs.json, data/majors-summary.json, data/schools.json
+ * Writes: src/data/{programs,majors-summary,schools,school-rankings}.json (COMMITTED —
+ *         the site bundles these; there is no database)
  */
 
 import { readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+const DATA_DIR = path.join(__dirname, '..', 'data'); // raw inputs (gitignored)
+const OUT_DIR = path.join(__dirname, '..', 'src', 'data'); // app-ready outputs (committed)
 
 // --- Types ---
 
@@ -383,16 +385,16 @@ function main() {
   console.log('\nWriting output files...');
 
   const schoolsArray = Array.from(schoolMap.values());
-  writeFileSync(path.join(DATA_DIR, 'schools.json'), JSON.stringify(schoolsArray));
+  writeFileSync(path.join(OUT_DIR, 'schools.json'), JSON.stringify(schoolsArray));
   console.log(`  schools.json: ${schoolsArray.length.toLocaleString()} schools`);
 
-  writeFileSync(path.join(DATA_DIR, 'programs.json'), JSON.stringify(programs));
+  writeFileSync(path.join(OUT_DIR, 'programs.json'), JSON.stringify(programs));
   console.log(`  programs.json: ${programs.length.toLocaleString()} programs`);
 
-  writeFileSync(path.join(DATA_DIR, 'majors-summary.json'), JSON.stringify(majorsSummary, null, 2));
+  writeFileSync(path.join(OUT_DIR, 'majors-summary.json'), JSON.stringify(majorsSummary, null, 2));
   console.log(`  majors-summary.json: ${majorsSummary.length} majors`);
 
-  writeFileSync(path.join(DATA_DIR, 'school-rankings.json'), JSON.stringify(schoolRankings));
+  writeFileSync(path.join(OUT_DIR, 'school-rankings.json'), JSON.stringify(schoolRankings));
   console.log(`  school-rankings.json: ${schoolRankings.length.toLocaleString()} school rankings`);
 
   // 6. Print top 20 majors

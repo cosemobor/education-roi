@@ -4,7 +4,6 @@ import { useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import type { ViewTab, MajorSummary, SchoolRanking } from '@/types';
-import { trackEvent } from '@/lib/analytics';
 
 const VALID_TABS: ViewTab[] = ['majors', 'colleges'];
 import PageNav from '@/components/PageNav';
@@ -29,7 +28,6 @@ export default function AppShell({ majorsSummary, schoolRankings }: AppShellProp
 
   const handleTabChange = useCallback((tab: ViewTab) => {
     setActiveTab(tab);
-    trackEvent('tab_switch', { tab });
     const url = new URL(window.location.href);
     url.searchParams.set('tab', tab);
     window.history.replaceState({}, '', url.toString());

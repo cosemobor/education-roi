@@ -1,3 +1,25 @@
+# Higher Education Outcomes (edu.hamindex.com)
+
+Next.js 16 app ranking majors and colleges by graduate earnings, built on the
+U.S. Department of Education College Scorecard.
+
+## Data — no database
+
+The site has no runtime database. The app-ready data lives in `src/data/*.json`
+(committed) and is bundled into the deploy, indexed in memory by
+`src/lib/data/store.ts`. The home page and `/api/majors` are fully static;
+`/majors/[cipCode]`, `/schools/[unitId]`, `/api/programs` and `/api/schools`
+render on demand from the bundled data.
+
+Refresh pipeline (run locally):
+
+```bash
+# needs SCORECARD_API_KEY in .env.local (free: https://api.data.gov/signup/)
+npx tsx scripts/fetch-scorecard.ts     # API → data/raw-*.json (gitignored)
+npx tsx scripts/process-scorecard.ts   # raw → src/data/*.json (committed)
+git add src/data && git commit && git push   # Vercel redeploys
+```
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started

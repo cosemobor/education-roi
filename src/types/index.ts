@@ -85,17 +85,3 @@ export type ViewTab = 'majors' | 'colleges';
 
 export type SortDir = 'asc' | 'desc';
 
-export type AnalyticsEventType =
-  | 'page_view'
-  | 'page_exit'
-  | 'tab_switch'
-  | 'search_query'
-  | 'search_select'
-  | 'major_click'
-  | 'school_click'
-  | 'program_click'
-  | 'tour_complete'
-  | 'tour_skip'
-  | 'newsletter_signup'
-  | 'newsletter_dismiss'
-  | 'newsletter_banner_click';

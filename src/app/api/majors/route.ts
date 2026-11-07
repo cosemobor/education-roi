@@ -1,28 +1,9 @@
-import { type NextRequest } from 'next/server';
-import { getDb } from '@/lib/db';
-import { majorsSummary } from '@/lib/db/schema';
-import { desc } from 'drizzle-orm';
-import { createRateLimiter, getClientIp } from '@/lib/rate-limit';
+import { majorsSummary } from '@/lib/data/store';
 
-const checkLimit = createRateLimiter('majors', 60_000, 60);
+// Prerendered at build time and served from the CDN — the data only changes
+// when src/data/ is rebuilt and redeployed.
+export const dynamic = 'force-static';
 
-export async function GET(request: NextRequest) {
-  const ip = getClientIp(request);
-  if (checkLimit(ip)) {
-    return Response.json(
-      { error: 'Too many requests. Please try again later.' },
-      { status: 429 },
-    );
-  }
-  const db = getDb();
-  const rows = await db
-    .select()
-    .from(majorsSummary)
-    .orderBy(desc(majorsSummary.medianEarn1yr));
-
-  return Response.json({ data: rows }, {
-    headers: {
-      'Cache-Control': 'public, s-maxage=86400, stale-while-revalidate=604800',
-    },
-  });
+export function GET() {
+  return Response.json({ data: majorsSummary });
 }

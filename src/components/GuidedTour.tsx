@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { trackEvent } from '@/lib/analytics';
 
 interface TourStep {
   target: string;
@@ -162,7 +161,6 @@ export default function GuidedTour({ restartKey = 0 }: GuidedTourProps) {
 
   const handleNext = useCallback(() => {
     if (step >= STEPS.length - 1) {
-      trackEvent('tour_complete');
       finish();
     } else {
       setStep((s) => s + 1);
@@ -170,9 +168,8 @@ export default function GuidedTour({ restartKey = 0 }: GuidedTourProps) {
   }, [step, finish]);
 
   const handleSkip = useCallback(() => {
-    trackEvent('tour_skip', { step });
     finish();
-  }, [step, finish]);
+  }, [finish]);
 
   // ESC key to skip
   useEffect(() => {

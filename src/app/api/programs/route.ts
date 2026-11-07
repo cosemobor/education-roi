@@ -1,12 +1,10 @@
-import { getDb } from '@/lib/db';
-import { programs, schools } from '@/lib/db/schema';
-import { eq, and, desc, isNotNull } from 'drizzle-orm';
+import { getPrograms, getSchool, topProgramsByEarnings } from '@/lib/data/store';
 import { type NextRequest } from 'next/server';
 import { createRateLimiter, getClientIp } from '@/lib/rate-limit';
 
 const checkLimit = createRateLimiter('programs', 60_000, 60);
 
-export async function GET(request: NextRequest) {
+export function GET(request: NextRequest) {
   const ip = getClientIp(request);
   if (checkLimit(ip)) {
     return Response.json(
@@ -15,7 +13,6 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const db = getDb();
   const { searchParams } = request.nextUrl;
   const cip = searchParams.get('cip');
   const schoolId = searchParams.get('school');
@@ -28,66 +25,55 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const selectFields = {
-    id: programs.id,
-    unitId: programs.unitId,
-    schoolName: programs.schoolName,
-    state: programs.state,
-    cipCode: programs.cipCode,
-    cipTitle: programs.cipTitle,
-    credLevel: programs.credLevel,
-    credTitle: programs.credTitle,
-    earn1yr: programs.earn1yr,
-    earn4yr: programs.earn4yr,
-    earn5yr: programs.earn5yr,
-    earn1yrCount: programs.earn1yrCount,
-    earn5yrCount: programs.earn5yrCount,
-    costAttendance: programs.costAttendance,
-    selectivityTier: programs.selectivityTier,
-    ownership: schools.ownership,
-    ownershipLabel: schools.ownershipLabel,
-    admissionRate: schools.admissionRate,
-    satMath75: schools.satMath75,
-    satRead75: schools.satRead75,
-    size: schools.size,
-    completionRate: schools.completionRate,
-  };
-
   let rows;
   if (all) {
-    // Lightweight response for "All Programs" scatter chart — no JOIN, minimal fields
-    rows = await db
-      .select({
-        unitId: programs.unitId,
-        schoolName: programs.schoolName,
-        state: programs.state,
-        cipTitle: programs.cipTitle,
-        credTitle: programs.credTitle,
-        earn1yr: programs.earn1yr,
-        earn5yr: programs.earn5yr,
-        costAttendance: programs.costAttendance,
-        selectivityTier: programs.selectivityTier,
-      })
-      .from(programs)
-      .where(isNotNull(programs.earn1yr))
-      .orderBy(desc(programs.earn1yr))
-      .limit(2000);
+    // Lightweight response for "All Programs" scatter chart — no join, minimal fields
+    rows = topProgramsByEarnings(2000).map((p) => ({
+      unitId: p.unitId,
+      schoolName: p.schoolName,
+      state: p.state,
+      cipTitle: p.cipTitle,
+      credTitle: p.credTitle,
+      earn1yr: p.earn1yr,
+      earn5yr: p.earn5yr,
+      costAttendance: p.costAttendance,
+      selectivityTier: p.selectivityTier,
+    }));
   } else {
-    const conditions = [];
-    if (cip) conditions.push(eq(programs.cipCode, cip));
+    let unitId: number | undefined;
     if (schoolId) {
-      const unitId = parseInt(schoolId, 10);
+      unitId = parseInt(schoolId, 10);
       if (isNaN(unitId)) {
         return Response.json({ error: 'Invalid school ID' }, { status: 400 });
       }
-      conditions.push(eq(programs.unitId, unitId));
     }
-    rows = await db
-      .select(selectFields)
-      .from(programs)
-      .leftJoin(schools, eq(programs.unitId, schools.unitId))
-      .where(conditions.length === 1 ? conditions[0] : and(...conditions))
-      .orderBy(desc(programs.earn1yr));
+    rows = getPrograms({ cip: cip ?? undefined, unitId }).map((p) => {
+      const s = getSchool(p.unitId);
+      return {
+        id: p.id,
+        unitId: p.unitId,
+        schoolName: p.schoolName,
+        state: p.state,
+        cipCode: p.cipCode,
+        cipTitle: p.cipTitle,
+        credLevel: p.credLevel,
+        credTitle: p.credTitle,
+        earn1yr: p.earn1yr,
+        earn4yr: p.earn4yr,
+        earn5yr: p.earn5yr,
+        earn1yrCount: p.earn1yrCount,
+        earn5yrCount: p.earn5yrCount,
+        costAttendance: p.costAttendance,
+        selectivityTier: p.selectivityTier,
+        ownership: s?.ownership ?? null,
+        ownershipLabel: s?.ownershipLabel ?? null,
+        admissionRate: s?.admissionRate ?? null,
+        satMath75: s?.satMath75 ?? null,
+        satRead75: s?.satRead75 ?? null,
+        size: s?.size ?? null,
+        completionRate: s?.completionRate ?? null,
+      };
+    });
   }
 
   const cacheControl =

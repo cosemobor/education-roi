@@ -16,90 +16,57 @@ export default function PrivacyPage() {
         Privacy Policy
       </h1>
       <p className="mt-2 text-sm text-text-secondary">
-        Last updated: February 2026
+        Last updated: November 2026
       </p>
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-text-primary">
-          1. Information We Collect
+          1. Scope
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-          The Site uses browser local storage to remember your preferences, such
-          as whether you have completed the guided tour. This data is stored
-          locally on your device and is not transmitted to any server.
-        </p>
-        <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-          Our hosting provider (Vercel) automatically collects standard server
-          logs, which include IP addresses, browser type, referring URLs, and
-          pages requested. We do not collect personal information such as names,
-          email addresses, or account credentials. The Site does not require user
-          registration or login.
-        </p>
-        <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-          We collect anonymous usage analytics to improve the Site. This includes
-          page views, time spent on pages, feature interactions (such as search
-          queries, major and school selections, and tab switches), and tour
-          completion status. Each browser tab is assigned a random session
-          identifier stored in sessionStorage, which is automatically cleared
-          when the tab is closed. No personal data, IP addresses, or cookies are
-          used for analytics.
+          This Privacy Policy applies only to this website (the &ldquo;Site&rdquo;). It does not apply to any other website, product, or service, including third-party sites linked from the Site.
         </p>
       </section>
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-text-primary">
-          2. How We Use Information
+          2. Information We Collect
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-          Server logs are used to operate, maintain, and monitor the
-          performance of the Site. Anonymous analytics data is used to
-          understand how visitors interact with the Site and to improve the
-          user experience. We do not sell personal information.
+          The Site does not require registration or login, and we do not ask you to provide personal information to use it.
+        </p>
+        <p className="mt-2 text-sm leading-relaxed text-text-secondary">
+          Like most websites, the Site and the service providers that operate it may automatically receive technical information that your browser or device sends when you visit, such as device, browser, and connection information and the pages requested.
+        </p>
+        <p className="mt-2 text-sm leading-relaxed text-text-secondary">
+          The Site may store preferences on your device using browser storage or similar technologies so that it functions as expected.
         </p>
       </section>
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-text-primary">
-          3. Third-Party Services
+          3. How We Use Information
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-          The Site relies on third-party services to function. These services
-          receive standard web requests when you use the Site and are governed
-          by their own privacy policies:
-        </p>
-        <ul className="mt-2 space-y-2 text-sm text-text-secondary">
-          <li>
-            <strong>Vercel</strong> &mdash; Hosting and serverless infrastructure
-          </li>
-          <li>
-            <strong>Turso</strong> &mdash; Database hosting
-          </li>
-        </ul>
-        <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-          We do not control the data practices of these third-party services.
+          We use information to operate, maintain, secure, and improve the Site, and to comply with legal obligations. We do not sell personal information.
         </p>
       </section>
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-text-primary">
-          4. Cookies
+          4. Service Providers
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-          The Site does not set cookies. Browser local storage is used solely
-          for site functionality (e.g., remembering tour completion) and is
-          not transmitted to any server.
+          The Site relies on third-party service providers, such as hosting, content delivery, and mapping providers, that receive standard web requests when you use the Site. Their handling of information is governed by their own terms and privacy policies, and we do not control their practices.
         </p>
       </section>
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-text-primary">
-          5. Data Sharing
+          5. Disclosure
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-          We do not sell or share personal information with third parties for
-          marketing purposes. We will disclose information if required by law,
-          legal process, or governmental request, or to protect our rights,
-          property, or safety.
+          We may disclose information if we believe it is required by law, legal process, or governmental request, or is necessary to protect the rights, property, or safety of the Site, its operators, or others, or in connection with a merger, acquisition, or transfer of assets.
         </p>
       </section>
 
@@ -108,11 +75,7 @@ export default function PrivacyPage() {
           6. Data Retention
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-          Server logs are retained in accordance with our hosting
-          provider&apos;s standard practices. Anonymous analytics data is
-          retained for up to one year and may be periodically purged. We do
-          not independently store personal information about visitors beyond
-          what is captured in standard server logs.
+          Information is retained for as long as reasonably necessary for the purposes described above, or as required by law, and in accordance with the practices of our service providers.
         </p>
       </section>
 
@@ -121,10 +84,7 @@ export default function PrivacyPage() {
           7. Security
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-          We use commercially reasonable measures to protect the Site and its
-          infrastructure. However, no method of transmission over the Internet
-          or method of electronic storage is 100% secure, and we cannot
-          guarantee absolute security.
+          We use commercially reasonable measures to protect the Site. No method of transmission over the Internet or of electronic storage is completely secure, and we cannot guarantee absolute security.
         </p>
       </section>
 
@@ -133,10 +93,7 @@ export default function PrivacyPage() {
           8. Children
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-          The Site is not directed at children under the age of 13. We do not
-          knowingly collect information from children under 13. If you believe
-          a child has provided information through the Site, please contact us
-          so we can take appropriate action.
+          The Site is not directed at children under the age of 13, and we do not knowingly collect personal information from them. If you believe a child has provided personal information through the Site, please contact us so we can take appropriate action.
         </p>
       </section>
 
@@ -145,10 +102,7 @@ export default function PrivacyPage() {
           9. Changes to This Policy
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-          We reserve the right to update this Privacy Policy at any time.
-          Changes take effect immediately upon posting to the Site. Your
-          continued use of the Site after any modification constitutes your
-          acceptance of the updated policy.
+          We may update this Privacy Policy at any time. Changes take effect when posted to the Site. Your continued use of the Site after any change constitutes acceptance of the updated policy.
         </p>
       </section>
 
