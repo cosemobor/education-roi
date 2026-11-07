@@ -126,7 +126,10 @@ export default function AboutPage() {
           All data is sourced from the{' '}
           <strong>U.S. Department of Education College Scorecard</strong>, which
           reports earnings of federal financial aid recipients one, four, and
-          five years after graduation.
+          five years after graduation. Figures reflect the Scorecard data as
+          updated in November 2026; the Department refreshed earnings for newer
+          graduating cohorts during 2026, so rankings can differ from earlier
+          versions of this site.
         </p>
         <p>
           <strong>College rankings</strong> use graduate-weighted average
