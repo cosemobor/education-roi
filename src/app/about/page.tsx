@@ -125,8 +125,11 @@ export default function AboutPage() {
         <p>
           All data is sourced from the{' '}
           <strong>U.S. Department of Education College Scorecard</strong>, which
-          reports earnings of federal financial aid recipients one, four, and
-          five years after graduation. Figures reflect the Scorecard data as
+          reports earnings of federal financial aid recipients one, four, five,
+          and seven years after graduation. Rankings default to seven-year
+          earnings where available; schools and majors without seven-year
+          data (the Department suppresses small cohorts) can be ranked by
+          shorter horizons instead. Figures reflect the Scorecard data as
           updated in November 2026; the Department refreshed earnings for newer
           graduating cohorts during 2026, so rankings can differ from earlier
           versions of this site.
@@ -139,12 +142,67 @@ export default function AboutPage() {
           high-earning programs from dominating the rankings.
         </p>
         <p>
-          <strong>ROI (Return on Investment)</strong> is calculated as
-          first-year weighted average earnings divided by cost of attendance.
-          A higher ratio means graduates earn more relative to what they paid.
-          We use published cost of attendance rather than net price because net
-          price varies significantly by family income, financial aid package, and
-          scholarship awards &mdash; making it inconsistent across students.
+          <strong>ROI (Return on Investment)</strong> asks: compared with going
+          straight to work after high school and putting the cost of college
+          into the stock market, how far ahead (or behind) does a graduate end
+          up? It is a net present value (NPV) in real 2024 dollars:
+        </p>
+        <ul className="list-disc space-y-1.5 pl-5">
+          <li>
+            <strong>Earnings premium.</strong> Each year&rsquo;s median earnings
+            minus what a high-school graduate earns in the school&rsquo;s state
+            (the Scorecard&rsquo;s benchmark: median earnings of high-school
+            graduates aged 25&ndash;34, from the Census American Community
+            Survey, in 2024 dollars).
+          </li>
+          <li>
+            <strong>Earnings path.</strong> The Scorecard publishes program
+            medians 1, 4, 5 and 7 years after graduation (pooled cohorts measured
+            in 2022&ndash;23, in 2024 dollars). Years in between are filled in
+            with straight lines; nothing past year 7 is projected in the
+            7-year view.
+          </li>
+          <li>
+            <strong>Cost.</strong> Four years of the school&rsquo;s average net
+            price (after grants), plus the wages given up while in school: what
+            an 18&ndash;21-year-old high-school graduate earns, measured at 57.1%
+            of the 25&ndash;34 benchmark (ACS 2024 microdata).
+          </li>
+          <li>
+            <strong>Time value of money.</strong> Future dollars are discounted
+            at the S&amp;P 500&rsquo;s total return (dividends reinvested) from
+            2000 to 2025 &mdash; 7.99% a year, or 5.31% after inflation (CPI-U
+            averaged 2.55% a year), per Aswath Damodaran&rsquo;s NYU Stern
+            dataset. The <em>inflation only</em> view shows the same figures
+            without discounting.
+          </li>
+          <li>
+            <strong>ROI multiple</strong> = NPV &divide; present value of the
+            cost. <strong>Payback</strong> is the year after graduation when the
+            discounted premium has covered the cost.
+          </li>
+          <li>
+            <strong>Career to age 45</strong> (an estimate, labeled as such)
+            extends years 8&ndash;23 using the major&rsquo;s earnings-by-age
+            curve from Census ACS 2021&ndash;24 microdata: each program keeps its
+            year-7 level and grows the way the major does nationally with age.
+            These curves are cross-sectional &mdash; today&rsquo;s older workers
+            stand in for future earnings. The high-school comparison rises with
+            age the same way. Majors without their own curve use the curve for
+            all bachelor&rsquo;s degrees.
+          </li>
+          <li>
+            <strong>If you might not finish</strong> weights the result by the
+            school&rsquo;s graduation rate. Non-completers are assumed to be
+            enrolled for two years and then earn the measured some-college
+            premium (1.143&times; a high-school graduate, ACS 2024).
+          </li>
+        </ul>
+        <p>
+          Caveats: stock-market returns are pre-tax and ignore that a degree
+          can&rsquo;t be sold like shares; earnings cover federal-aid
+          recipients; small programs are suppressed by the Department of
+          Education.
         </p>
         <p>
           <strong>Major rankings</strong> use graduate-weighted average earnings
@@ -164,14 +222,25 @@ export default function AboutPage() {
             graduates, then summed and divided by total graduates. Gives more
             weight to programs that produce more graduates.
           </MetricDef>
+          <MetricDef term="NPV (Net Present Value)">
+            Dollars a graduate comes out ahead (+) or behind (&minus;) a
+            high-school graduate who invested the cost of college in the
+            S&amp;P 500, over the selected horizon, in real 2024 dollars.
+          </MetricDef>
           <MetricDef term="ROI (Return on Investment)">
-            First-year weighted average earnings divided by cost of attendance.
-            Displayed as a multiplier (e.g., 1.5x means graduates earn 1.5
-            times what they paid). Higher is better. Uses published cost of
-            attendance for consistency across schools.
+            NPV divided by the present value of the cost (net price plus
+            forgone wages), shown as a multiple: 2.0&times; means the degree
+            returned twice its cost beyond what the market would have.
+            Negative means the market alternative came out ahead.
+          </MetricDef>
+          <MetricDef term="Payback">
+            The year after graduation when the cumulative discounted earnings
+            premium first covers the cost. &ldquo;&gt; 7 yrs&rdquo; or
+            &ldquo;&gt; career&rdquo; means not within the window.
           </MetricDef>
           <MetricDef term="Earnings Growth Rate">
-            The percentage change from first-year to fifth-year median earnings.
+            The percentage change from first-year to fifth-year median earnings
+            (seven-year earnings are shown alongside where reported).
             Shows how quickly graduates&rsquo; earnings increase after entering
             the workforce.
           </MetricDef>
@@ -249,11 +318,10 @@ export default function AboutPage() {
             student privacy. Some programs and schools may be missing.
           </li>
           <li>
-            <strong>Cost of attendance</strong> &mdash; ROI calculations use
-            published cost of attendance (sticker price) rather than net price
-            after financial aid. This provides a consistent baseline across
-            schools, though individual students may pay more or less depending
-            on their aid package.
+            <strong>Net price is an average</strong> &mdash; ROI uses the
+            school&rsquo;s average net price after grants for aided students.
+            Individual students may pay more or less depending on their aid
+            package and family income.
           </li>
           <li>
             <strong>No cost-of-living adjustment</strong> &mdash; Earnings are

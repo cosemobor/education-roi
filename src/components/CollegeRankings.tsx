@@ -11,6 +11,11 @@ import { formatCurrency, formatCompact, formatRate, formatNumber } from '@/lib/f
 import { getDisplayTier, TIER_COLORS, TIER_ORDER } from '@/lib/tiers';
 import StatCard from './StatCard';
 import SortableHeader from './SortableHeader';
+import RoiControls from './RoiControls';
+import {
+  BASIS_LABEL, compareNullsLast, formatNpv, formatPayback, formatRoiX, pickRoi, signClass,
+  type RoiBasis, type RoiHorizon,
+} from '@/lib/roiView';
 
 interface ScatterDatum {
   x: number;
@@ -23,7 +28,8 @@ interface ScatterDatum {
   earnings: number;
   costAttendance: number;
   programCount: number;
-  roi: number | null;
+  npv: number | null;
+  npvLabel: string;
   topProgram: string | null;
 }
 
@@ -38,10 +44,13 @@ function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{
         <span>Earnings: <strong className="text-earn-above">{formatCurrency(d.earnings)}</strong></span>
         <span>Cost: <strong>{formatCurrency(d.costAttendance)}</strong></span>
         <span>Programs: <strong>{d.programCount}</strong></span>
-        {d.roi != null && (
-          <span>ROI: <strong>{d.roi.toFixed(1)}x</strong></span>
+        {d.npv != null && (
+          <span>
+            NPV: <strong className={signClass(d.npv)}>{formatNpv(d.npv)}</strong>
+          </span>
         )}
       </div>
+      {d.npv != null && <p className="mt-0.5 text-[10px] text-text-secondary">NPV = {d.npvLabel}</p>}
       {d.admissionRate != null && (
         <p className="mt-1 text-[10px] text-text-secondary">
           Acceptance: {formatRate(d.admissionRate)}
@@ -60,9 +69,12 @@ function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{
 
 type SortField =
   | 'name'
-  | 'weightedEarn1yr'
+  | 'weightedEarn7yr'
   | 'weightedEarn5yr'
-  | 'roi'
+  | 'weightedEarn1yr'
+  | 'npv'
+  | 'roiX'
+  | 'payback'
   | 'programCount'
   | 'admissionRate'
   | 'costAttendance';
@@ -76,7 +88,7 @@ interface CollegeRankingsProps {
 export default function CollegeRankings({
   schoolRankings,
 }: CollegeRankingsProps) {
-  const [sortField, setSortField] = useState<SortField>('weightedEarn1yr');
+  const [sortField, setSortField] = useState<SortField>('weightedEarn7yr');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [ownershipFilter, setOwnershipFilter] = useState<number | null>(null);
@@ -85,8 +97,12 @@ export default function CollegeRankings({
   const [minPrograms, setMinPrograms] = useState(5);
   const [page, setPage] = useState(1);
   const [compareSet, setCompareSet] = useState<Set<number>>(new Set());
-  const [chartEarnings, setChartEarnings] = useState<'earn1yr' | 'earn5yr'>('earn5yr');
+  const [chartEarnings, setChartEarnings] = useState<'earn7yr' | 'earn5yr' | 'earn1yr'>('earn7yr');
   const [selectedSchool, setSelectedSchool] = useState<number | null>(null);
+  const [roiHorizon, setRoiHorizon] = useState<RoiHorizon>('7yr');
+  const [roiBasis, setRoiBasis] = useState<RoiBasis>('sp');
+  const roiOf = useCallback((r: SchoolRanking) => pickRoi(r, roiHorizon, roiBasis), [roiHorizon, roiBasis]);
+  const roiLabel = `${roiHorizon === '7yr' ? '7 yrs' : 'career'}, ${BASIS_LABEL[roiBasis]}`;
   const chartRef = useRef<HTMLDivElement>(null);
   const dotClickedRef = useRef(false);
 
@@ -126,6 +142,17 @@ export default function CollegeRankings({
   // Sort
   const sorted = useMemo(() => {
     const rows = [...filtered];
+    if (sortField === 'npv' || sortField === 'roiX' || sortField === 'payback') {
+      const get = (r: SchoolRanking) => {
+        const x = roiOf(r);
+        if (sortField === 'npv') return x.npv;
+        if (sortField === 'roiX') return x.roi;
+        // Payback: beyond the window ranks after any in-window year
+        return x.npv == null ? null : (x.payback ?? 99);
+      };
+      rows.sort((a, b) => compareNullsLast(get(a), get(b), sortDir));
+      return rows;
+    }
     rows.sort((a, b) => {
       const av = a[sortField];
       const bv = b[sortField];
@@ -140,7 +167,7 @@ export default function CollegeRankings({
         : (bv as number) - (av as number);
     });
     return rows;
-  }, [filtered, sortField, sortDir]);
+  }, [filtered, sortField, sortDir, roiOf]);
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
@@ -155,7 +182,7 @@ export default function CollegeRankings({
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     } else {
       setSortField(field);
-      setSortDir(field === 'name' ? 'asc' : 'desc');
+      setSortDir(field === 'name' || field === 'payback' ? 'asc' : 'desc');
     }
     setPage(1);
   }, [sortField]);
@@ -177,22 +204,22 @@ export default function CollegeRankings({
 
   // Stats
   const stats = useMemo(() => {
-    const withEarn = filtered.filter((r) => r.weightedEarn1yr != null);
+    const withEarn = filtered.filter((r) => r.weightedEarn7yr != null);
     const highest = withEarn.length
       ? withEarn.reduce((best, r) =>
-          (r.weightedEarn1yr ?? 0) > (best.weightedEarn1yr ?? 0) ? r : best,
+          (r.weightedEarn7yr ?? 0) > (best.weightedEarn7yr ?? 0) ? r : best,
           withEarn[0],
         )
       : null;
-    const withROI = filtered.filter((r) => r.roi != null);
+    const withROI = filtered.filter((r) => roiOf(r).npv != null);
     const bestROI = withROI.length
       ? withROI.reduce((best, r) =>
-          (r.roi ?? 0) > (best.roi ?? 0) ? r : best,
+          (roiOf(r).npv ?? -Infinity) > (roiOf(best).npv ?? -Infinity) ? r : best,
           withROI[0],
         )
       : null;
     return { total: filtered.length, highest, bestROI };
-  }, [filtered]);
+  }, [filtered, roiOf]);
 
   // Comparison
   const comparedSchools = useMemo(() => {
@@ -213,7 +240,13 @@ export default function CollegeRankings({
   }, []);
 
   // Scatter chart data — built from ALL schools (minPrograms baseline) for dim/highlight
-  const earningsKey = chartEarnings === 'earn1yr' ? 'weightedEarn1yr' : 'weightedEarn5yr';
+  const earningsKey =
+    chartEarnings === 'earn7yr'
+      ? 'weightedEarn7yr'
+      : chartEarnings === 'earn5yr'
+        ? 'weightedEarn5yr'
+        : 'weightedEarn1yr';
+  const horizonLabel = chartEarnings === 'earn7yr' ? '7yr' : chartEarnings === 'earn5yr' ? '5yr' : '1yr';
 
   const allChartData = useMemo(() => {
     const all: ScatterDatum[] = [];
@@ -232,12 +265,13 @@ export default function CollegeRankings({
         earnings: r[earningsKey]!,
         costAttendance: r.costAttendance,
         programCount: r.programCount,
-        roi: r.roi,
+        npv: roiOf(r).npv,
+        npvLabel: roiLabel,
         topProgram: r.topProgram,
       });
     }
     return all;
-  }, [schoolRankings, minPrograms, earningsKey]);
+  }, [schoolRankings, minPrograms, earningsKey, roiOf, roiLabel]);
 
   // Axis domains
   const { xDomain, yDomain } = useMemo(() => {
@@ -335,17 +369,17 @@ export default function CollegeRankings({
       <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <StatCard label="Total Colleges" value={formatNumber(stats.total)} />
         <StatCard
-          label="Highest Earning College"
+          label="Highest Earning College (7yr)"
           value={
             stats.highest
-              ? formatCurrency(stats.highest.weightedEarn1yr)
+              ? formatCurrency(stats.highest.weightedEarn7yr)
               : '\u2014'
           }
           detail={stats.highest?.name}
         />
         <StatCard
-          label="Best ROI"
-          value={stats.bestROI?.roi != null ? stats.bestROI.roi.toFixed(1) + 'x' : '\u2014'}
+          label={`Best ROI (NPV, ${roiLabel})`}
+          value={stats.bestROI ? formatNpv(roiOf(stats.bestROI).npv) : '\u2014'}
           detail={stats.bestROI?.name}
         />
       </div>
@@ -371,24 +405,34 @@ export default function CollegeRankings({
             </h3>
             <div className="flex rounded-lg border border-gray-200 text-xs">
               <button
-                onClick={() => setChartEarnings('earn1yr')}
+                onClick={() => setChartEarnings('earn7yr')}
                 className={`rounded-l-lg px-3 py-1.5 transition-colors ${
-                  chartEarnings === 'earn1yr'
+                  chartEarnings === 'earn7yr'
                     ? 'bg-accent text-white'
                     : 'text-text-secondary hover:text-text-primary'
                 }`}
               >
-                1-Year
+                7-Year
               </button>
               <button
                 onClick={() => setChartEarnings('earn5yr')}
-                className={`rounded-r-lg px-3 py-1.5 transition-colors ${
+                className={`px-3 py-1.5 transition-colors ${
                   chartEarnings === 'earn5yr'
                     ? 'bg-accent text-white'
                     : 'text-text-secondary hover:text-text-primary'
                 }`}
               >
                 5-Year
+              </button>
+              <button
+                onClick={() => setChartEarnings('earn1yr')}
+                className={`rounded-r-lg px-3 py-1.5 transition-colors ${
+                  chartEarnings === 'earn1yr'
+                    ? 'bg-accent text-white'
+                    : 'text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                1-Year
               </button>
             </div>
           </div>
@@ -411,7 +455,7 @@ export default function CollegeRankings({
                 tick={{ fontSize: 11, fill: '#6b7280' }}
                 width={60}
                 label={{
-                  value: chartEarnings === 'earn1yr' ? 'Avg 1yr Earnings' : 'Avg 5yr Earnings',
+                  value: `Avg ${horizonLabel} Earnings`,
                   angle: -90,
                   position: 'insideLeft',
                   offset: 5,
@@ -515,7 +559,7 @@ export default function CollegeRankings({
 
               <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <div>
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Earnings</p>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">{horizonLabel} Earnings</p>
                   <p className="text-sm font-semibold text-earn-above">{formatCurrency(selectedSchoolData.earnings)}</p>
                 </div>
                 <div>
@@ -523,8 +567,8 @@ export default function CollegeRankings({
                   <p className="text-sm font-semibold">{formatCurrency(selectedSchoolData.costAttendance)}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">ROI</p>
-                  <p className="text-sm font-semibold">{selectedSchoolData.roi != null ? selectedSchoolData.roi.toFixed(1) + 'x' : '\u2014'}</p>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">NPV ({roiHorizon === '7yr' ? '7 yrs' : 'career'})</p>
+                  <p className={`text-sm font-semibold ${signClass(selectedSchoolData.npv)}`}>{formatNpv(selectedSchoolData.npv)}</p>
                 </div>
                 <div>
                   <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Admit Rate</p>
@@ -591,20 +635,36 @@ export default function CollegeRankings({
                   <p className="mb-2 text-xs text-text-secondary">{r.state} &middot; {tier}</p>
                   <div className="space-y-1.5 text-xs">
                     <div className="flex justify-between">
-                      <span className="text-text-secondary">Avg 1yr</span>
-                      <span className="font-medium text-earn-above">{formatCurrency(r.weightedEarn1yr)}</span>
+                      <span className="text-text-secondary">Avg 7yr</span>
+                      <span className="font-medium text-earn-above">
+                        {r.weightedEarn7yr != null ? formatCurrency(r.weightedEarn7yr) : <span className="font-normal text-text-secondary">no 7-yr data</span>}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-text-secondary">Avg 5yr</span>
                       <span className="font-medium text-earn-above">{formatCurrency(r.weightedEarn5yr)}</span>
                     </div>
                     <div className="flex justify-between">
+                      <span className="text-text-secondary">Avg 1yr</span>
+                      <span className="font-medium text-earn-above">{formatCurrency(r.weightedEarn1yr)}</span>
+                    </div>
+                    <div className="flex justify-between">
                       <span className="text-text-secondary">Cost</span>
                       <span className="font-medium">{formatCurrency(r.costAttendance)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-text-secondary">ROI</span>
-                      <span className="font-semibold">{r.roi != null ? r.roi.toFixed(1) + 'x' : '\u2014'}</span>
+                      <span className="text-text-secondary">NPV ({roiLabel})</span>
+                      <span className={`font-semibold ${signClass(roiOf(r).npv)}`}>{formatNpv(roiOf(r).npv)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-secondary">ROI &middot; Payback</span>
+                      <span className="font-medium">
+                        {formatRoiX(roiOf(r).roi)} &middot; {formatPayback(roiOf(r).payback, roiHorizon, roiOf(r).npv != null)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-2" title="Weights by the school's graduation rate; discounted vs S&P 500">
+                      <span className="text-text-secondary">If you might not finish</span>
+                      <span className="font-medium">{formatRoiX(roiOf(r).expectedRoi)}</span>
                     </div>
                     <hr className="border-gray-100" />
                     <div className="flex justify-between">
@@ -781,7 +841,19 @@ export default function CollegeRankings({
         )}
       </div>
 
+      {/* ROI view */}
+      <RoiControls
+        horizon={roiHorizon}
+        basis={roiBasis}
+        onHorizon={(h) => { setRoiHorizon(h); setPage(1); }}
+        onBasis={(b) => { setRoiBasis(b); setPage(1); }}
+        className="mb-2"
+      />
+
       {/* Count */}
+      <p className="mb-1 text-xs text-text-secondary">
+        Some schools lack 7-year data (small cohorts are suppressed by the Dept. of Education) &mdash; sort by 5-year to see them.
+      </p>
       <p className="mb-2 text-xs text-text-secondary">
         {filtered.length} of {schoolRankings.length} colleges
         {compareSet.size > 0 && (
@@ -808,8 +880,8 @@ export default function CollegeRankings({
                 onClick={handleSort}
               />
               <SortableHeader<SortField>
-                label="1yr Earnings"
-                sortKey="weightedEarn1yr"
+                label="7yr Earnings"
+                sortKey="weightedEarn7yr"
                 currentSortKey={sortField}
                 currentSortDir={sortDir}
                 onClick={handleSort}
@@ -824,6 +896,14 @@ export default function CollegeRankings({
                 className="hidden text-right sm:table-cell"
               />
               <SortableHeader<SortField>
+                label="1yr Earnings"
+                sortKey="weightedEarn1yr"
+                currentSortKey={sortField}
+                currentSortDir={sortDir}
+                onClick={handleSort}
+                className="hidden text-right sm:table-cell"
+              />
+              <SortableHeader<SortField>
                 label="Cost"
                 sortKey="costAttendance"
                 currentSortKey={sortField}
@@ -832,12 +912,28 @@ export default function CollegeRankings({
                 className="hidden text-right sm:table-cell"
               />
               <SortableHeader<SortField>
-                label="ROI"
-                sortKey="roi"
+                label="NPV"
+                sortKey="npv"
                 currentSortKey={sortField}
                 currentSortDir={sortDir}
                 onClick={handleSort}
                 className="text-right"
+              />
+              <SortableHeader<SortField>
+                label="ROI"
+                sortKey="roiX"
+                currentSortKey={sortField}
+                currentSortDir={sortDir}
+                onClick={handleSort}
+                className="hidden text-right sm:table-cell"
+              />
+              <SortableHeader<SortField>
+                label="Payback"
+                sortKey="payback"
+                currentSortKey={sortField}
+                currentSortDir={sortDir}
+                onClick={handleSort}
+                className="hidden text-right md:table-cell"
               />
               <SortableHeader<SortField>
                 label="Admit"
@@ -886,7 +982,7 @@ export default function CollegeRankings({
                       className="h-3.5 w-3.5 rounded border-gray-300 text-accent accent-accent"
                     />
                   </td>
-                  <td className="px-3 py-2.5 text-right text-xs tabular-nums text-text-secondary w-10">
+                  <td className="w-8 px-1.5 py-2.5 text-right text-xs tabular-nums text-text-secondary sm:w-10 sm:px-3">
                     {rank}
                   </td>
                   <td className="px-3 py-2.5 text-sm">
@@ -904,22 +1000,38 @@ export default function CollegeRankings({
                       >
                         {r.name}
                       </Link>
-                      <span className="text-xs text-text-secondary">
+                      <span className="hidden text-xs text-text-secondary sm:inline">
                         {r.state}
                       </span>
                     </span>
                   </td>
                   <td className="px-3 py-2.5 text-right text-sm tabular-nums font-medium text-earn-above">
-                    {formatCurrency(r.weightedEarn1yr)}
+                    {r.weightedEarn7yr != null ? (
+                      formatCurrency(r.weightedEarn7yr)
+                    ) : (
+                      <span className="text-text-secondary" title="No 7-year data (small cohorts are suppressed)">
+                        {'\u2014'}
+                        <span className="ml-1 hidden text-[10px] font-normal lg:inline">no 7-yr data</span>
+                      </span>
+                    )}
                   </td>
                   <td className="hidden px-3 py-2.5 text-right text-sm tabular-nums text-text-secondary sm:table-cell">
                     {formatCurrency(r.weightedEarn5yr)}
                   </td>
                   <td className="hidden px-3 py-2.5 text-right text-sm tabular-nums text-text-secondary sm:table-cell">
+                    {formatCurrency(r.weightedEarn1yr)}
+                  </td>
+                  <td className="hidden px-3 py-2.5 text-right text-sm tabular-nums text-text-secondary sm:table-cell">
                     {formatCurrency(r.costAttendance)}
                   </td>
-                  <td className="px-3 py-2.5 text-right text-sm tabular-nums font-semibold text-text-primary">
-                    {r.roi != null ? r.roi.toFixed(1) + 'x' : '\u2014'}
+                  <td className={`whitespace-nowrap px-2 py-2.5 text-right text-sm tabular-nums font-semibold sm:px-3 ${signClass(roiOf(r).npv)}`}>
+                    {formatNpv(roiOf(r).npv)}
+                  </td>
+                  <td className="hidden px-3 py-2.5 text-right text-sm tabular-nums text-text-primary sm:table-cell">
+                    {formatRoiX(roiOf(r).roi)}
+                  </td>
+                  <td className="hidden px-3 py-2.5 text-right text-sm tabular-nums text-text-secondary md:table-cell">
+                    {formatPayback(roiOf(r).payback, roiHorizon, roiOf(r).npv != null)}
                   </td>
                   <td className="hidden px-3 py-2.5 text-right text-sm tabular-nums text-text-secondary md:table-cell">
                     {formatRate(r.admissionRate)}
@@ -936,7 +1048,7 @@ export default function CollegeRankings({
             {paginated.length === 0 && (
               <tr>
                 <td
-                  colSpan={10}
+                  colSpan={13}
                   className="px-3 py-8 text-center text-sm text-text-secondary"
                 >
                   No colleges match your filters

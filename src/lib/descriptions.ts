@@ -16,6 +16,9 @@ export function generateMajorDescription(major: MajorSummary): string {
         earnings += ` (${formatPercent(major.growthRate)})`;
       }
     }
+    if (major.medianEarn7yr != null) {
+      earnings += `${major.medianEarn5yr != null ? ' and' : ', growing to'} ${formatCurrency(major.medianEarn7yr)} by year seven`;
+    }
     parts.push(earnings + '.');
   }
 

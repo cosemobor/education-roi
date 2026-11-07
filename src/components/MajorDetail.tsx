@@ -12,16 +12,21 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import Link from 'next/link';
-import type { MajorSummary, ProgramRecord, SortDir } from '@/types';
+import type { MajorSummary, ProgramRecord, RoiFields, SortDir } from '@/types';
 import { formatCurrency, formatCompact, formatRate, formatNumber, formatPercent } from '@/lib/formatters';
 import { getDisplayTier, TIER_COLORS, TIER_ORDER } from '@/lib/tiers';
 import { generateMajorDescription } from '@/lib/descriptions';
 import StatCard from './StatCard';
 import ShareButton from './ShareButton';
 import SortableHeader from './SortableHeader';
+import RoiControls from './RoiControls';
+import {
+  compareNullsLast, formatNpv, formatPayback, formatRoiX, pickRoi, signClass,
+  type RoiBasis, type RoiHorizon,
+} from '@/lib/roiView';
 
-type EarningsKey = 'earn1yr' | 'earn5yr';
-type SortField = 'schoolName' | 'earn1yr' | 'earn5yr' | 'cost' | 'multiple' | 'admissionRate';
+type EarningsKey = 'earn7yr' | 'earn5yr' | 'earn1yr';
+type SortField = 'schoolName' | 'earn7yr' | 'earn5yr' | 'earn1yr' | 'cost' | 'npv' | 'roiX' | 'admissionRate';
 
 const PAGE_SIZE = 25;
 
@@ -78,25 +83,30 @@ interface RankedRow {
   state: string;
   tier: string;
   credTitle: string;
-  earn1yr: number | null;
+  earn7yr: number | null;
   earn5yr: number | null;
+  earn1yr: number | null;
   cost: number;
-  multiple: number;
+  roiFields: RoiFields;
+  careerCurve: 'major' | 'all' | null;
   admissionRate: number | null;
   satCombined: number | null;
 }
 
 export default function MajorDetail({ major, programs, fromTab }: MajorDetailProps) {
-  const [sortField, setSortField] = useState<SortField>('earn1yr');
+  const [sortField, setSortField] = useState<SortField>('earn7yr');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [ownershipFilter, setOwnershipFilter] = useState<number | null>(null);
   const [stateFilter, setStateFilter] = useState('');
   const [tierFilter, setTierFilter] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
-  const [earningsKey, setEarningsKey] = useState<EarningsKey>('earn1yr');
+  const [earningsKey, setEarningsKey] = useState<EarningsKey>('earn7yr');
   const [selectedSchool, setSelectedSchool] = useState<number | null>(null);
   const [compareSet, setCompareSet] = useState<Set<number>>(new Set());
+  const [roiHorizon, setRoiHorizon] = useState<RoiHorizon>('7yr');
+  const [roiBasis, setRoiBasis] = useState<RoiBasis>('sp');
+  const roiOf = useCallback((r: { roiFields: RoiFields }) => pickRoi(r.roiFields, roiHorizon, roiBasis), [roiHorizon, roiBasis]);
   const chartRef = useRef<HTMLDivElement>(null);
   const dotClickedRef = useRef(false);
 
@@ -117,7 +127,7 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
   // Build ranked rows from programs
   const allRows = useMemo(() => {
     return programs
-      .filter((p) => p.earn1yr != null || p.earn5yr != null)
+      .filter((p) => p.earn7yr != null || p.earn1yr != null || p.earn5yr != null)
       .map((p) => ({
         rank: 0,
         unitId: p.unitId,
@@ -125,13 +135,12 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
         state: p.state,
         tier: getDisplayTier(p.schoolName, p.selectivityTier || '', p.admissionRate, p.size),
         credTitle: p.credTitle,
-        earn1yr: p.earn1yr,
+        earn7yr: p.earn7yr,
         earn5yr: p.earn5yr,
+        earn1yr: p.earn1yr,
         cost: p.costAttendance ?? 0,
-        multiple:
-          p.costAttendance && p.earn1yr
-            ? p.earn1yr / p.costAttendance
-            : 0,
+        roiFields: p as RoiFields,
+        careerCurve: p.careerCurve,
         admissionRate: p.admissionRate,
         satCombined:
           p.satMath75 != null && p.satRead75 != null
@@ -164,7 +173,7 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
     return rows;
   }, [allRows, searchQuery, ownershipFilter, stateFilter, tierFilter, programs]);
 
-  // Static axes — computed from max of BOTH earn1yr and earn5yr so toggle doesn't rescale
+  // Static axes — computed from max of ALL horizons so the toggle doesn't rescale
   const { xDomain, yDomain, yTicks } = useMemo(() => {
     let maxX = 0, maxY = 0;
     for (const r of allRows) {
@@ -172,6 +181,7 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
       if (r.cost > maxX) maxX = r.cost;
       if (r.earn1yr != null && r.earn1yr > maxY) maxY = r.earn1yr;
       if (r.earn5yr != null && r.earn5yr > maxY) maxY = r.earn5yr;
+      if (r.earn7yr != null && r.earn7yr > maxY) maxY = r.earn7yr;
     }
     const yMax = Math.max(100000, Math.ceil(maxY / 25000) * 25000);
     const xMax = Math.max(80000, Math.ceil(maxX / 10000) * 10000);
@@ -234,9 +244,15 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
 
   const hasScatterData = allChartData.length > 0;
 
-  const medianLine = earningsKey === 'earn1yr' ? major.medianEarn1yr : major.medianEarn5yr;
+  const medianLine =
+    earningsKey === 'earn7yr'
+      ? major.medianEarn7yr
+      : earningsKey === 'earn5yr'
+        ? major.medianEarn5yr
+        : major.medianEarn1yr;
 
-  const earningsLabel = earningsKey === 'earn1yr' ? '1-Year' : '5-Year';
+  const earningsLabel = earningsKey === 'earn7yr' ? '7-Year' : earningsKey === 'earn5yr' ? '5-Year' : '1-Year';
+  const horizonShort = earningsKey === 'earn7yr' ? '7yr' : earningsKey === 'earn5yr' ? '5yr' : '1yr';
 
   const handleDotClick = useCallback((data: any) => {
     const uid = data?.unitId ?? data?.payload?.unitId;
@@ -264,7 +280,7 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
   }, []);
 
   const stats = useMemo(() => {
-    const earnKey = earningsKey === 'earn1yr' ? 'earn1yr' : 'earn5yr';
+    const earnKey = earningsKey;
     const withEarn = allRows.filter((r) => r[earnKey] != null);
     const highest = withEarn.length
       ? withEarn.reduce((best, r) =>
@@ -272,7 +288,7 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
           withEarn[0],
         )
       : null;
-    return { highest, highestEarnKey: earnKey as 'earn1yr' | 'earn5yr' };
+    return { highest, highestEarnKey: earnKey };
   }, [allRows, earningsKey]);
 
   const comparedSchools = useMemo(() => {
@@ -308,6 +324,17 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
   // Sort
   const sorted = useMemo(() => {
     const rows = [...filtered];
+    if (sortField === 'npv' || sortField === 'roiX') {
+      rows.sort((a, b) =>
+        compareNullsLast(
+          sortField === 'npv' ? roiOf(a).npv : roiOf(a).roi,
+          sortField === 'npv' ? roiOf(b).npv : roiOf(b).roi,
+          sortDir,
+        ),
+      );
+      rows.forEach((r, i) => (r.rank = i + 1));
+      return rows;
+    }
     rows.sort((a, b) => {
       const av = a[sortField];
       const bv = b[sortField];
@@ -323,7 +350,7 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
     });
     rows.forEach((r, i) => (r.rank = i + 1));
     return rows;
-  }, [filtered, sortField, sortDir]);
+  }, [filtered, sortField, sortDir, roiOf]);
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
@@ -389,13 +416,18 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
       <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label="Schools" value={formatNumber(major.schoolCount)} />
         <StatCard
-          label={`Highest Earning (${earningsKey === 'earn1yr' ? '1yr' : '5yr'})`}
+          label={`Highest Earning (${horizonShort})`}
           value={stats.highest ? formatCurrency(stats.highest[stats.highestEarnKey]) : '\u2014'}
           detail={stats.highest?.schoolName}
         />
         <StatCard
-          label={`Median (${earningsKey === 'earn1yr' ? '1yr' : '5yr'})`}
-          value={formatCurrency(earningsKey === 'earn1yr' ? major.medianEarn1yr : major.medianEarn5yr)}
+          label={`Median (${horizonShort})`}
+          value={formatCurrency(medianLine)}
+          detail={
+            earningsKey === 'earn7yr' && major.medianEarn7yr == null && major.nationalMedianEarn7yr != null
+              ? `${formatCurrency(major.nationalMedianEarn7yr)} national`
+              : undefined
+          }
         />
         <StatCard
           label="Earnings Growth"
@@ -412,24 +444,34 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
             </h2>
             <div className="flex rounded-lg border border-gray-200 text-xs">
               <button
-                onClick={() => setEarningsKey('earn1yr')}
+                onClick={() => setEarningsKey('earn7yr')}
                 className={`px-3 py-1.5 transition-colors rounded-l-lg ${
-                  earningsKey === 'earn1yr'
+                  earningsKey === 'earn7yr'
                     ? 'bg-accent text-white'
                     : 'text-text-secondary hover:text-text-primary'
                 }`}
               >
-                1-Year
+                7-Year
               </button>
               <button
                 onClick={() => setEarningsKey('earn5yr')}
-                className={`px-3 py-1.5 transition-colors rounded-r-lg ${
+                className={`px-3 py-1.5 transition-colors ${
                   earningsKey === 'earn5yr'
                     ? 'bg-accent text-white'
                     : 'text-text-secondary hover:text-text-primary'
                 }`}
               >
                 5-Year
+              </button>
+              <button
+                onClick={() => setEarningsKey('earn1yr')}
+                className={`px-3 py-1.5 transition-colors rounded-r-lg ${
+                  earningsKey === 'earn1yr'
+                    ? 'bg-accent text-white'
+                    : 'text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                1-Year
               </button>
             </div>
           </div>
@@ -586,8 +628,10 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
 
               <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <div>
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">1yr Earnings</p>
-                  <p className="text-sm font-semibold text-earn-above">{formatCurrency(selectedRow.earn1yr)}</p>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">7yr Earnings</p>
+                  <p className="text-sm font-semibold text-earn-above">
+                    {selectedRow.earn7yr != null ? formatCurrency(selectedRow.earn7yr) : <span className="text-xs font-normal text-text-secondary">no 7-yr data</span>}
+                  </p>
                 </div>
                 <div>
                   <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">5yr Earnings</p>
@@ -596,12 +640,21 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
                   </p>
                 </div>
                 <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">1yr Earnings</p>
+                  <p className="text-sm font-semibold text-earn-above">{formatCurrency(selectedRow.earn1yr)}</p>
+                </div>
+                <div>
                   <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Cost</p>
                   <p className="text-sm font-semibold">{selectedRow.cost > 0 ? formatCurrency(selectedRow.cost) : '\u2014'}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">ROI</p>
-                  <p className="text-sm font-semibold">{selectedRow.multiple > 0 ? selectedRow.multiple.toFixed(1) + 'x' : '\u2014'}</p>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">
+                    NPV ({roiHorizon === '7yr' ? '7 yrs' : 'career'})
+                  </p>
+                  <p className={`text-sm font-semibold ${signClass(roiOf(selectedRow).npv)}`}>
+                    {formatNpv(roiOf(selectedRow).npv)}
+                    <span className="ml-1 text-xs font-normal text-text-secondary">{formatRoiX(roiOf(selectedRow).roi)}</span>
+                  </p>
                 </div>
               </div>
 
@@ -645,8 +698,10 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
                 <p className="mt-0.5 text-[10px] text-text-secondary">{r.state} &middot; {r.tier}</p>
                 <div className="mt-2 space-y-1 text-xs">
                   <div className="flex justify-between">
-                    <span className="text-text-secondary">1yr Earnings</span>
-                    <span className="font-medium text-earn-above">{formatCurrency(r.earn1yr)}</span>
+                    <span className="text-text-secondary">7yr Earnings</span>
+                    <span className="font-medium text-earn-above">
+                      {r.earn7yr != null ? formatCurrency(r.earn7yr) : <span className="font-normal text-text-secondary">no 7-yr data</span>}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-text-secondary">5yr Earnings</span>
@@ -655,12 +710,26 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
                     </span>
                   </div>
                   <div className="flex justify-between">
+                    <span className="text-text-secondary">1yr Earnings</span>
+                    <span className="font-medium text-earn-above">{formatCurrency(r.earn1yr)}</span>
+                  </div>
+                  <div className="flex justify-between">
                     <span className="text-text-secondary">Cost</span>
                     <span className="font-medium">{r.cost > 0 ? formatCurrency(r.cost) : '\u2014'}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-text-secondary">ROI</span>
-                    <span className="font-semibold">{r.multiple > 0 ? r.multiple.toFixed(1) + 'x' : '\u2014'}</span>
+                    <span className="text-text-secondary">NPV ({roiHorizon === '7yr' ? '7 yrs' : 'career'})</span>
+                    <span className={`font-semibold ${signClass(roiOf(r).npv)}`}>{formatNpv(roiOf(r).npv)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">ROI &middot; Payback</span>
+                    <span className="font-medium">
+                      {formatRoiX(roiOf(r).roi)} &middot; {formatPayback(roiOf(r).payback, roiHorizon, roiOf(r).npv != null)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-2" title="Weights by the school's graduation rate; discounted vs S&P 500">
+                    <span className="text-text-secondary">If you might not finish</span>
+                    <span className="font-medium">{formatRoiX(roiOf(r).expectedRoi)}</span>
                   </div>
                 </div>
               </div>
@@ -799,6 +868,20 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
         )}
       </div>
 
+      {/* ROI view */}
+      <RoiControls
+        horizon={roiHorizon}
+        basis={roiBasis}
+        onHorizon={(h) => { setRoiHorizon(h); setPage(1); }}
+        onBasis={(b) => { setRoiBasis(b); setPage(1); }}
+        className="mt-3"
+      />
+      {roiHorizon === 'career' && allRows.some((r) => r.careerCurve === 'all') && (
+        <p className="mt-1 text-[11px] text-text-secondary">
+          This major has no Census age profile of its own; the career view uses the all-bachelor&rsquo;s curve.
+        </p>
+      )}
+
       {/* Count */}
       <p className="mt-2 text-xs text-text-secondary">
         Showing {sorted.length} of {allRows.length} programs
@@ -821,8 +904,8 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
                 onClick={handleSort}
               />
               <SortableHeader<SortField>
-                label="1yr Earnings"
-                sortKey="earn1yr"
+                label="7yr Earnings"
+                sortKey="earn7yr"
                 currentSortKey={sortField}
                 currentSortDir={sortDir}
                 onClick={handleSort}
@@ -837,6 +920,14 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
                 className="hidden text-right sm:table-cell"
               />
               <SortableHeader<SortField>
+                label="1yr Earnings"
+                sortKey="earn1yr"
+                currentSortKey={sortField}
+                currentSortDir={sortDir}
+                onClick={handleSort}
+                className="hidden text-right sm:table-cell"
+              />
+              <SortableHeader<SortField>
                 label="Cost"
                 sortKey="cost"
                 currentSortKey={sortField}
@@ -845,12 +936,20 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
                 className="hidden text-right sm:table-cell"
               />
               <SortableHeader<SortField>
-                label="ROI"
-                sortKey="multiple"
+                label="NPV"
+                sortKey="npv"
                 currentSortKey={sortField}
                 currentSortDir={sortDir}
                 onClick={handleSort}
                 className="text-right"
+              />
+              <SortableHeader<SortField>
+                label="ROI"
+                sortKey="roiX"
+                currentSortKey={sortField}
+                currentSortDir={sortDir}
+                onClick={handleSort}
+                className="hidden text-right sm:table-cell"
               />
               <SortableHeader<SortField>
                 label="Admit"
@@ -907,16 +1006,29 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
                   </span>
                 </td>
                 <td className="px-3 py-2 text-right font-medium text-earn-above">
-                  {formatCurrency(r.earn1yr)}
+                  {r.earn7yr != null ? (
+                    formatCurrency(r.earn7yr)
+                  ) : (
+                    <span className="font-normal text-text-secondary" title="No 7-year data (small cohorts are suppressed)">
+                      {'\u2014'}
+                      <span className="ml-1 hidden text-[10px] lg:inline">no 7-yr data</span>
+                    </span>
+                  )}
                 </td>
                 <td className="hidden px-3 py-2 text-right font-medium text-earn-above sm:table-cell">
                   {r.earn5yr != null ? formatCurrency(r.earn5yr) : '\u2014'}
                 </td>
+                <td className="hidden px-3 py-2 text-right font-medium text-earn-above sm:table-cell">
+                  {formatCurrency(r.earn1yr)}
+                </td>
                 <td className="hidden px-3 py-2 text-right text-text-secondary sm:table-cell">
                   {r.cost > 0 ? formatCurrency(r.cost) : '\u2014'}
                 </td>
-                <td className="px-3 py-2 text-right font-semibold text-text-primary">
-                  {r.multiple > 0 ? r.multiple.toFixed(1) + 'x' : '\u2014'}
+                <td className={`px-3 py-2 text-right font-semibold ${signClass(roiOf(r).npv)}`}>
+                  {formatNpv(roiOf(r).npv)}
+                </td>
+                <td className="hidden px-3 py-2 text-right text-text-primary sm:table-cell">
+                  {formatRoiX(roiOf(r).roi)}
                 </td>
                 <td className="hidden px-3 py-2 text-right text-text-secondary md:table-cell">
                   {formatRate(r.admissionRate)}
@@ -929,7 +1041,7 @@ export default function MajorDetail({ major, programs, fromTab }: MajorDetailPro
             {paginated.length === 0 && (
               <tr>
                 <td
-                  colSpan={9}
+                  colSpan={11}
                   className="px-3 py-8 text-center text-sm text-text-secondary"
                 >
                   No programs match your filters

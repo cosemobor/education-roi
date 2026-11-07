@@ -11,14 +11,32 @@ The site has no runtime database. The app-ready data lives in `src/data/*.json`
 `/majors/[cipCode]`, `/schools/[unitId]`, `/api/programs` and `/api/schools`
 render on demand from the bundled data.
 
-Refresh pipeline (run locally):
+Refresh pipeline (run locally, in this order):
 
 ```bash
-# needs SCORECARD_API_KEY in .env.local (free: https://api.data.gov/signup/)
-npx tsx scripts/fetch-scorecard.ts     # API → data/raw-*.json (gitignored)
-npx tsx scripts/process-scorecard.ts   # raw → src/data/*.json (committed)
-git add src/data && git commit && git push   # Vercel redeploys
+# 1. Download the full Scorecard archive ("Download All Data", ~560MB) from
+#    https://collegescorecard.ed.gov/data/ into data/scorecard-archive/ (gitignored)
+# 2. Institutions from the API — needs SCORECARD_API_KEY in .env.local
+#    (free: https://api.data.gov/signup/)
+npx tsx scripts/fetch-scorecard.ts        # → data/raw-institutions.json
+# 3. Programs from the bulk Most-Recent field-of-study file (the API omits ~4% of programs)
+npx tsx scripts/programs-from-bulk.ts     # → data/raw-programs.json + data/release.json
+# 4. Census earnings-by-age curves for the ROI career view (needs CENSUS_API_KEY)
+npx tsx scripts/build-age-profiles.ts     # → src/data/age-profiles.json
+# 5. Site data incl. ROI (src/lib/roi.ts) + a dated snapshot of this release
+npx tsx scripts/process-scorecard.ts      # → src/data/*.json, snapshots/scorecard-<release>.json.gz
+# 6. Over-time data
+npx tsx scripts/build-school-history.ts   # cost 2009-10→latest + earnings checkpoints → src/data/school-history.json
+npx tsx scripts/build-major-history.ts    # ACS wages by field of degree → src/data/major-history.json
+                                          #   (needs CENSUS_API_KEY; reads ../HAM/.env.local if missing here)
+git add src/data snapshots && git commit && git push   # Vercel redeploys
 ```
+
+Rankings default to 7-year earnings (then 5-, then 1-year). ROI is the NPV of the
+earnings premium over a high-school graduate minus cost (net price + forgone wages),
+discounted at the S&P 500's 2000–2025 total return (5.31% real) — see src/lib/roi.ts. `snapshots/` keeps
+one compressed copy per Scorecard release so the site accumulates its own
+consistent history; it is committed but not used by the running site.
 
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 

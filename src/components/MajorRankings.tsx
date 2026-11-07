@@ -18,6 +18,7 @@ interface MajorScatterDatum {
   cipCode: string;
   cipTitle: string;
   category: string;
+  median7yr: number | null;
   median1yr: number;
   median5yr: number;
   growthRate: number;
@@ -31,8 +32,9 @@ function MajorChartTooltip({ active, payload }: { active?: boolean; payload?: Ar
     <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-lg">
       <p className="text-sm font-semibold text-text-primary">{d.cipTitle.replace(/\.+$/, '')}</p>
       <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs">
-        <span>Median 1yr: <strong className="text-earn-above">{formatCurrency(d.median1yr)}</strong></span>
+        <span>Median 7yr: <strong className="text-earn-above">{formatCurrency(d.median7yr)}</strong></span>
         <span>Median 5yr: <strong className="text-earn-above">{formatCurrency(d.median5yr)}</strong></span>
+        <span>Median 1yr: <strong className="text-earn-above">{formatCurrency(d.median1yr)}</strong></span>
         <span>Growth: <strong className={d.growthRate > 0 ? 'text-earn-above' : 'text-text-secondary'}>{d.growthRate > 0 ? '+' : ''}{d.growthRate}%</strong></span>
         <span>Schools: <strong>{d.schoolCount}</strong></span>
       </div>
@@ -47,7 +49,7 @@ function MajorChartTooltip({ active, payload }: { active?: boolean; payload?: Ar
   );
 }
 
-type SortKey = 'cipTitle' | 'medianEarn1yr' | 'medianEarn5yr' | 'growthRate' | 'schoolCount';
+type SortKey = 'cipTitle' | 'medianEarn7yr' | 'medianEarn5yr' | 'medianEarn1yr' | 'growthRate' | 'schoolCount';
 
 const PAGE_SIZE = 25;
 
@@ -56,15 +58,22 @@ interface MajorRankingsProps {
 }
 
 export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
-  const [sortKey, setSortKey] = useState<SortKey>('medianEarn1yr');
+  const [sortKey, setSortKey] = useState<SortKey>('medianEarn7yr');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [minSchools, setMinSchools] = useState(10);
   const [categoryFilter, setCategoryFilter] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
   const [compareSet, setCompareSet] = useState<Set<string>>(new Set());
-  const [chartEarnings, setChartEarnings] = useState<'earn1yr' | 'earn5yr'>('earn1yr');
+  const [chartEarnings, setChartEarnings] = useState<'earn7yr' | 'earn5yr' | 'earn1yr'>('earn7yr');
   const [selectedMajor, setSelectedMajor] = useState<string | null>(null);
+  const earningsField: 'medianEarn7yr' | 'medianEarn5yr' | 'medianEarn1yr' =
+    chartEarnings === 'earn7yr'
+      ? 'medianEarn7yr'
+      : chartEarnings === 'earn5yr'
+        ? 'medianEarn5yr'
+        : 'medianEarn1yr';
+  const horizonLabel = chartEarnings === 'earn7yr' ? '7yr' : chartEarnings === 'earn5yr' ? '5yr' : '1yr';
   const chartRef = useRef<HTMLDivElement>(null);
   const dotClickedRef = useRef(false);
 
@@ -136,7 +145,7 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
   );
 
   const stats = useMemo(() => {
-    const earnKey: 'medianEarn1yr' | 'medianEarn5yr' = chartEarnings === 'earn1yr' ? 'medianEarn1yr' : 'medianEarn5yr';
+    const earnKey = earningsField;
     const withEarn = filtered.filter((m) => m[earnKey] != null);
     const highest = withEarn.length
       ? withEarn.reduce((best, m) =>
@@ -152,7 +161,7 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
         )
       : null;
     return { total: filtered.length, highest, highestEarnKey: earnKey, fastestGrowth };
-  }, [filtered, chartEarnings]);
+  }, [filtered, earningsField]);
 
   // Comparison
   const comparedMajors = useMemo(() => {
@@ -173,7 +182,6 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
   }, []);
 
   // Scatter chart: always show all qualifying data; dim non-matching points
-  const earningsField = chartEarnings === 'earn1yr' ? 'medianEarn1yr' : 'medianEarn5yr';
   const hasActiveFilter = !!(searchQuery.trim() || categoryFilter.size > 0 || compareSet.size > 0);
 
   // Base chart data: minSchools filter only (axes stay stable)
@@ -190,6 +198,7 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
         cipCode: m.cipCode,
         cipTitle: m.cipTitle,
         category: getCipCategory(m.cipCode),
+        median7yr: m.medianEarn7yr,
         median1yr: m.medianEarn1yr,
         median5yr: m.medianEarn5yr,
         growthRate: m.growthRate,
@@ -205,7 +214,8 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
     return {
       allChartData: all,
       xDomain: [xLo - xPad, xHi + xPad] as [number, number],
-      yDomain: [0, 125000] as [number, number],
+      // Longer horizons run higher — extend the axis past 125K when needed
+      yDomain: [0, Math.max(125000, Math.ceil(maxY / 25000) * 25000)] as [number, number],
     };
   }, [majorsSummary, minSchools, earningsField]);
 
@@ -315,7 +325,7 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
       <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <StatCard label="Total Majors" value={formatNumber(stats.total)} />
         <StatCard
-          label={`Highest Earning (${chartEarnings === 'earn1yr' ? '1yr' : '5yr'})`}
+          label={`Highest Earning (${horizonLabel})`}
           value={stats.highest ? formatCurrency(stats.highest[stats.highestEarnKey]) : '\u2014'}
           detail={stats.highest?.cipTitle.replace(/\.+$/, '')}
         />
@@ -352,24 +362,34 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
             </span>
             <div className="flex rounded-lg border border-gray-200 text-xs">
               <button
-                onClick={() => setChartEarnings('earn1yr')}
+                onClick={() => setChartEarnings('earn7yr')}
                 className={`px-3 py-1.5 transition-colors rounded-l-lg ${
-                  chartEarnings === 'earn1yr'
+                  chartEarnings === 'earn7yr'
                     ? 'bg-accent text-white'
                     : 'text-text-secondary hover:text-text-primary'
                 }`}
               >
-                1-Year
+                7-Year
               </button>
               <button
                 onClick={() => setChartEarnings('earn5yr')}
-                className={`px-3 py-1.5 transition-colors rounded-r-lg ${
+                className={`px-3 py-1.5 transition-colors ${
                   chartEarnings === 'earn5yr'
                     ? 'bg-accent text-white'
                     : 'text-text-secondary hover:text-text-primary'
                 }`}
               >
                 5-Year
+              </button>
+              <button
+                onClick={() => setChartEarnings('earn1yr')}
+                className={`px-3 py-1.5 transition-colors rounded-r-lg ${
+                  chartEarnings === 'earn1yr'
+                    ? 'bg-accent text-white'
+                    : 'text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                1-Year
               </button>
             </div>
           </div>
@@ -392,7 +412,7 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
                 tickFormatter={(v: number) => formatCompact(v)}
                 tick={{ fontSize: 11, fill: '#475569' }}
                 width={60}
-                label={{ value: chartEarnings === 'earn1yr' ? 'Median 1yr Earnings' : 'Median 5yr Earnings', angle: -90, position: 'insideLeft', offset: 5, fontSize: 12, fill: '#475569' }}
+                label={{ value: `Median ${horizonLabel} Earnings`, angle: -90, position: 'insideLeft', offset: 5, fontSize: 12, fill: '#475569' }}
               />
               <Tooltip content={<MajorChartTooltip />} cursor={false} />
               {/* Dimmed background points (non-matching when filter active) */}
@@ -474,12 +494,16 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
 
               <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <div>
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Median 1yr</p>
-                  <p className="text-sm font-semibold text-earn-above">{formatCurrency(selectedMajorData.median1yr)}</p>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Median 7yr</p>
+                  <p className="text-sm font-semibold text-earn-above">{formatCurrency(selectedMajorData.median7yr)}</p>
                 </div>
                 <div>
                   <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Median 5yr</p>
                   <p className="text-sm font-semibold text-earn-above">{formatCurrency(selectedMajorData.median5yr)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Median 1yr</p>
+                  <p className="text-sm font-semibold text-earn-above">{formatCurrency(selectedMajorData.median1yr)}</p>
                 </div>
                 <div>
                   <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Growth</p>
@@ -546,12 +570,24 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
                   <p className="mb-2 text-xs text-text-secondary">{category}</p>
                   <div className="space-y-1.5 text-xs">
                     <div className="flex justify-between">
-                      <span className="text-text-secondary">Median 1yr</span>
-                      <span className="font-medium text-earn-above">{formatCurrency(m.medianEarn1yr)}</span>
+                      <span className="text-text-secondary">Median 7yr</span>
+                      <span className="font-medium text-earn-above">
+                        {m.medianEarn7yr != null ? (
+                          formatCurrency(m.medianEarn7yr)
+                        ) : m.nationalMedianEarn7yr != null ? (
+                          <span className="font-normal text-text-secondary">{formatCurrency(m.nationalMedianEarn7yr)} national</span>
+                        ) : (
+                          <span className="font-normal text-text-secondary">no 7-yr data</span>
+                        )}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-text-secondary">Median 5yr</span>
                       <span className="font-medium text-earn-above">{formatCurrency(m.medianEarn5yr)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-secondary">Median 1yr</span>
+                      <span className="font-medium text-earn-above">{formatCurrency(m.medianEarn1yr)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-text-secondary">Growth</span>
@@ -565,12 +601,16 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
                     </div>
                     <hr className="border-gray-100" />
                     <div className="flex justify-between">
-                      <span className="text-text-secondary">1yr Range</span>
-                      <span>{formatCurrency(m.p25Earn1yr)}&ndash;{formatCurrency(m.p75Earn1yr)}</span>
+                      <span className="text-text-secondary">7yr Range</span>
+                      <span>{formatCurrency(m.p25Earn7yr)}&ndash;{formatCurrency(m.p75Earn7yr)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-text-secondary">5yr Range</span>
                       <span>{formatCurrency(m.p25Earn5yr)}&ndash;{formatCurrency(m.p75Earn5yr)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-text-secondary">1yr Range</span>
+                      <span>{formatCurrency(m.p25Earn1yr)}&ndash;{formatCurrency(m.p75Earn1yr)}</span>
                     </div>
                   </div>
                 </div>
@@ -689,12 +729,20 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
                 onClick={handleSort}
               />
               <SortableHeader<SortKey>
+                label="Median 7yr"
+                sortKey="medianEarn7yr"
+                currentSortKey={sortKey}
+                currentSortDir={sortDir}
+                onClick={handleSort}
+                className="text-right"
+              />
+              <SortableHeader<SortKey>
                 label="Median 5yr"
                 sortKey="medianEarn5yr"
                 currentSortKey={sortKey}
                 currentSortDir={sortDir}
                 onClick={handleSort}
-                className="text-right"
+                className="hidden text-right sm:table-cell"
               />
               <SortableHeader<SortKey>
                 label="Median 1yr"
@@ -763,7 +811,22 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
                     </Link>
                   </span>
                 </td>
-                <td className="px-3 py-2.5 text-right text-sm tabular-nums text-text-primary">
+                <td className="px-3 py-2.5 text-right text-sm tabular-nums font-medium text-text-primary">
+                  {m.medianEarn7yr != null ? (
+                    formatCurrency(m.medianEarn7yr)
+                  ) : m.nationalMedianEarn7yr != null ? (
+                    <span className="font-normal text-text-secondary" title="Scorecard national median for this field — too few graduates in the school-level data">
+                      {formatCurrency(m.nationalMedianEarn7yr)}
+                      <span className="ml-1 text-[10px]">natl</span>
+                    </span>
+                  ) : (
+                    <span className="font-normal text-text-secondary" title="No 7-year data">
+                      {'\u2014'}
+                      <span className="ml-1 hidden text-[10px] lg:inline">no 7-yr data</span>
+                    </span>
+                  )}
+                </td>
+                <td className="hidden px-3 py-2.5 text-right text-sm tabular-nums text-text-primary sm:table-cell">
                   {formatCurrency(m.medianEarn5yr)}
                 </td>
                 <td className="hidden px-3 py-2.5 text-right text-sm tabular-nums text-text-primary sm:table-cell">
@@ -786,7 +849,7 @@ export default function MajorRankings({ majorsSummary }: MajorRankingsProps) {
             {paginated.length === 0 && (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="px-3 py-8 text-center text-sm text-text-secondary"
                 >
                   No majors match your search

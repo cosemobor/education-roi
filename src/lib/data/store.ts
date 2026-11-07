@@ -10,6 +10,7 @@ import schoolsJson from '@/data/schools.json';
 import programsJson from '@/data/programs.json';
 import majorsJson from '@/data/majors-summary.json';
 import rankingsJson from '@/data/school-rankings.json';
+import type { RoiFields } from '@/types';
 
 export interface SchoolRow {
   unitId: number;
@@ -33,7 +34,7 @@ export interface SchoolRow {
   lon: number | null;
 }
 
-export interface ProgramRow {
+export interface ProgramRow extends RoiFields {
   id: number;
   unitId: number;
   schoolName: string | null;
@@ -45,10 +46,13 @@ export interface ProgramRow {
   earn1yr: number | null;
   earn4yr: number | null;
   earn5yr: number | null;
+  earn7yr: number | null;
   earn1yrCount: number | null;
   earn5yrCount: number | null;
+  earn7yrCount: number | null;
   costAttendance: number | null;
   selectivityTier: string | null;
+  careerCurve: 'major' | 'all' | null;
 }
 
 export interface MajorSummaryRow {
@@ -62,10 +66,15 @@ export interface MajorSummaryRow {
   p75Earn1yr: number | null;
   p25Earn5yr: number | null;
   p75Earn5yr: number | null;
+  medianEarn7yr: number | null;
+  p25Earn7yr: number | null;
+  p75Earn7yr: number | null;
+  nationalMedianEarn7yr: number | null;
   growthRate: number | null;
+  growthRate1to7: number | null;
 }
 
-export interface SchoolRankingRow {
+export interface SchoolRankingRow extends RoiFields {
   unitId: number;
   name: string;
   city: string;
@@ -83,7 +92,10 @@ export interface SchoolRankingRow {
   medianEarn1yr: number | null;
   weightedEarn1yr: number | null;
   weightedEarn5yr: number | null;
+  weightedEarn7yr: number | null;
+  /** Legacy 1-yr earnings ÷ cost ratio — superseded by the NPV fields; not displayed. */
   roi: number | null;
+  hsEarnings: number | null;
   maxEarn1yr: number | null;
   topProgram: string | null;
 }
@@ -98,6 +110,21 @@ function descNullsLast<T>(get: (x: T) => number | null) {
     if (vb == null) return -1;
     return vb - va;
   };
+}
+
+/**
+ * Longest earnings horizon first: 7yr DESC, then 5yr, then 1yr — rows missing
+ * a horizon sort after rows that have it (NULLs last at every level).
+ */
+function longestHorizonDesc<T>(
+  get7: (x: T) => number | null,
+  get5: (x: T) => number | null,
+  get1: (x: T) => number | null,
+) {
+  const c7 = descNullsLast(get7);
+  const c5 = descNullsLast(get5);
+  const c1 = descNullsLast(get1);
+  return (a: T, b: T) => c7(a, b) || c5(a, b) || c1(a, b);
 }
 
 /** SQLite BINARY collation: plain code-unit comparison. */
@@ -115,24 +142,24 @@ const programs = (programsJson as unknown as Omit<ProgramRow, 'id'>[]).map(
 
 export const majorsSummary: MajorSummaryRow[] = (majorsJson as unknown as RawMajor[])
   .map(({ growthRate1to5, ...m }) => ({ ...m, growthRate: growthRate1to5 }))
-  .sort(descNullsLast((m) => m.medianEarn1yr));
+  .sort(longestHorizonDesc((m) => m.medianEarn7yr, (m) => m.medianEarn5yr, (m) => m.medianEarn1yr));
 
 export const schoolRankings: SchoolRankingRow[] = [
   ...(rankingsJson as unknown as SchoolRankingRow[]),
-].sort(descNullsLast((r) => r.weightedEarn1yr));
+].sort(longestHorizonDesc((r) => r.weightedEarn7yr, (r) => r.weightedEarn5yr, (r) => r.weightedEarn1yr));
 
 const schoolsById = new Map(schools.map((s) => [s.unitId, s]));
 const majorsByCip = new Map(majorsSummary.map((m) => [m.cipCode, m]));
 
-const byEarn1yr = descNullsLast<ProgramRow>((p) => p.earn1yr);
+const byEarnings = longestHorizonDesc<ProgramRow>((p) => p.earn7yr, (p) => p.earn5yr, (p) => p.earn1yr);
 const programsByCip = new Map<string, ProgramRow[]>();
 const programsByUnit = new Map<number, ProgramRow[]>();
 for (const p of programs) {
   (programsByCip.get(p.cipCode) ?? programsByCip.set(p.cipCode, []).get(p.cipCode)!).push(p);
   (programsByUnit.get(p.unitId) ?? programsByUnit.set(p.unitId, []).get(p.unitId)!).push(p);
 }
-for (const list of programsByCip.values()) list.sort(byEarn1yr);
-for (const list of programsByUnit.values()) list.sort(byEarn1yr);
+for (const list of programsByCip.values()) list.sort(byEarnings);
+for (const list of programsByUnit.values()) list.sort(byEarnings);
 
 export const schoolsByName = [...schools].sort((a, b) => binaryAsc(a.name, b.name));
 
@@ -140,11 +167,18 @@ export function getSchool(unitId: number): SchoolRow | undefined {
   return schoolsById.get(unitId);
 }
 
+const rankingsById = new Map(schoolRankings.map((r) => [r.unitId, r]));
+
+/** Pre-aggregated ranking row (earnings + ROI) for a school, if it is ranked. */
+export function getSchoolRanking(unitId: number): SchoolRankingRow | undefined {
+  return rankingsById.get(unitId);
+}
+
 export function getMajor(cipCode: string): MajorSummaryRow | undefined {
   return majorsByCip.get(cipCode);
 }
 
-/** Programs for a major and/or school, earn1yr DESC (NULLs last). */
+/** Programs for a major and/or school, longest horizon first (7yr → 5yr → 1yr, NULLs last). */
 export function getPrograms({ cip, unitId }: { cip?: string; unitId?: number }): ProgramRow[] {
   let rows: ProgramRow[];
   if (cip != null && unitId != null) {
@@ -159,10 +193,10 @@ export function getPrograms({ cip, unitId }: { cip?: string; unitId?: number }):
   return rows;
 }
 
-/** Top `limit` programs with a 1-yr earnings figure, earn1yr DESC. */
+/** Top `limit` programs with any earnings figure, longest horizon first. */
 export function topProgramsByEarnings(limit: number): ProgramRow[] {
   return programs
-    .filter((p) => p.earn1yr != null)
-    .sort(byEarn1yr)
+    .filter((p) => p.earn7yr != null || p.earn5yr != null || p.earn1yr != null)
+    .sort(byEarnings)
     .slice(0, limit);
 }

@@ -69,6 +69,9 @@ const FOS_FIELDS = [
   'latest.programs.cip_4_digit.earnings.4_yr.working_not_enrolled.overall_count',
   'latest.programs.cip_4_digit.earnings.5_yr.overall_median_earnings',
   'latest.programs.cip_4_digit.earnings.5_yr.working_not_enrolled.overall_count',
+  'latest.programs.cip_4_digit.earnings.7_yr.overall_median_earnings',
+  'latest.programs.cip_4_digit.earnings.7_yr.working_not_enrolled.overall_count',
+  'latest.programs.cip_4_digit.earnings.7_yr.overall_median_earnings_national',
 ].join(',');
 
 interface ApiResponse {
@@ -152,6 +155,9 @@ async function main() {
     earn4yrCount: number | null;
     earn5yr: number | null;
     earn5yrCount: number | null;
+    earn7yr: number | null;
+    earn7yrCount: number | null;
+    earn7yrNational: number | null;
   }
 
   const programs: Program[] = [];
@@ -171,6 +177,7 @@ async function main() {
       const e1 = p.earnings?.['1_yr'] || {};
       const e4 = p.earnings?.['4_yr'] || {};
       const e5 = p.earnings?.['5_yr'] || {};
+      const e7 = p.earnings?.['7_yr'] || {};
 
       programs.push({
         unitId,
@@ -187,6 +194,9 @@ async function main() {
         earn4yrCount: e4.working_not_enrolled?.overall_count ?? null,
         earn5yr: e5.overall_median_earnings ?? null,
         earn5yrCount: e5.working_not_enrolled?.overall_count ?? null,
+        earn7yr: e7.overall_median_earnings ?? null,
+        earn7yrCount: e7.working_not_enrolled?.overall_count ?? null,
+        earn7yrNational: e7.overall_median_earnings_national ?? null,
       });
     }
   }

@@ -12,15 +12,20 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from 'recharts';
-import type { School, ProgramRecord, SortDir } from '@/types';
+import type { School, ProgramRecord, RoiFields, SortDir } from '@/types';
 import { formatCurrency, formatRate, formatNumber, formatCompact } from '@/lib/formatters';
 import { getDisplayTier, TIER_COLORS } from '@/lib/tiers';
 import { generateSchoolDescription } from '@/lib/descriptions';
 import { getCipCategory, CIP_CATEGORY_COLORS, CIP_CATEGORY_ORDER } from '@/lib/cip-categories';
 import StatCard from './StatCard';
 import ShareButton from './ShareButton';
+import RoiControls from './RoiControls';
+import {
+  compareNullsLast, formatNpv, formatPayback, formatRoiX, pickRoi, signClass,
+  type RoiBasis, type RoiHorizon,
+} from '@/lib/roiView';
 
-type SortField = 'cipTitle' | 'earn1yr' | 'earn5yr' | 'costAttendance' | 'multiple' | 'credTitle';
+type SortField = 'cipTitle' | 'earn7yr' | 'earn5yr' | 'earn1yr' | 'costAttendance' | 'npv' | 'roiX' | 'credTitle';
 
 const PAGE_SIZE = 25;
 
@@ -32,6 +37,7 @@ interface DotDatum {
   cipTitle: string;
   credTitle: string;
   category: string;
+  earn7yr: number | null;
   earn1yr: number | null;
   earn5yr: number | null;
 }
@@ -44,8 +50,9 @@ function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{
       <p className="text-sm font-semibold text-text-primary">{d.cipTitle.replace(/\.+$/, '')}</p>
       <p className="text-xs text-text-secondary">{d.credTitle}</p>
       <div className="mt-1.5 flex gap-4 text-xs">
-        <span>1yr: <strong className="text-earn-above">{d.earn1yr != null ? formatCurrency(d.earn1yr) : '\u2014'}</strong></span>
+        <span>7yr: <strong className="text-earn-above">{d.earn7yr != null ? formatCurrency(d.earn7yr) : '\u2014'}</strong></span>
         <span>5yr: <strong className="text-earn-above">{d.earn5yr != null ? formatCurrency(d.earn5yr) : '\u2014'}</strong></span>
+        <span>1yr: <strong className="text-earn-above">{d.earn1yr != null ? formatCurrency(d.earn1yr) : '\u2014'}</strong></span>
       </div>
       <span
         className="mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium text-white"
@@ -72,21 +79,25 @@ interface ProgramRow {
   credLevel: number;
   credTitle: string;
   category: string;
+  earn7yr: number | null;
   earn1yr: number | null;
   earn5yr: number | null;
   costAttendance: number | null;
-  multiple: number;
+  roiFields: RoiFields;
   earn1yrCount: number | null;
 }
 
 export default function SchoolDetail({ school, programs, fromTab }: SchoolDetailProps) {
-  const [sortField, setSortField] = useState<SortField>('earn1yr');
+  const [sortField, setSortField] = useState<SortField>('earn7yr');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [credFilter, setCredFilter] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
   const [selectedProgram, setSelectedProgram] = useState<string | null>(null);
   const [compareSet, setCompareSet] = useState<Set<string>>(new Set());
+  const [roiHorizon, setRoiHorizon] = useState<RoiHorizon>('7yr');
+  const [roiBasis, setRoiBasis] = useState<RoiBasis>('sp');
+  const roiOf = useCallback((r: ProgramRow) => pickRoi(r.roiFields, roiHorizon, roiBasis), [roiHorizon, roiBasis]);
   const chartRef = useRef<HTMLDivElement>(null);
   const dotClickedRef = useRef(false);
 
@@ -108,7 +119,7 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
   // Build rows from programs
   const allRows = useMemo(() => {
     return programs
-      .filter((p) => p.earn1yr != null || p.earn5yr != null)
+      .filter((p) => p.earn7yr != null || p.earn1yr != null || p.earn5yr != null)
       .map((p) => ({
         rank: 0,
         progKey: `${p.cipCode}-${p.credLevel}`,
@@ -117,11 +128,11 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
         credLevel: p.credLevel,
         credTitle: p.credTitle,
         category: getCipCategory(p.cipCode),
+        earn7yr: p.earn7yr,
         earn1yr: p.earn1yr,
         earn5yr: p.earn5yr,
         costAttendance: p.costAttendance,
-        multiple:
-          p.costAttendance && p.earn1yr ? p.earn1yr / p.costAttendance : 0,
+        roiFields: p as RoiFields,
         earn1yrCount: p.earn1yrCount,
       }));
   }, [programs]);
@@ -180,6 +191,7 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
         cipTitle: r.cipTitle,
         credTitle: r.credTitle,
         category: r.category,
+        earn7yr: r.earn7yr,
         earn1yr: r.earn1yr,
         earn5yr: r.earn5yr,
       });
@@ -274,6 +286,17 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
   // Sort
   const sorted = useMemo(() => {
     const rows = [...filtered];
+    if (sortField === 'npv' || sortField === 'roiX') {
+      rows.sort((a, b) =>
+        compareNullsLast(
+          sortField === 'npv' ? roiOf(a).npv : roiOf(a).roi,
+          sortField === 'npv' ? roiOf(b).npv : roiOf(b).roi,
+          sortDir,
+        ),
+      );
+      rows.forEach((r, i) => (r.rank = i + 1));
+      return rows;
+    }
     rows.sort((a, b) => {
       const av = a[sortField];
       const bv = b[sortField];
@@ -289,7 +312,7 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
     });
     rows.forEach((r, i) => (r.rank = i + 1));
     return rows;
-  }, [filtered, sortField, sortDir]);
+  }, [filtered, sortField, sortDir, roiOf]);
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
@@ -556,14 +579,20 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
 
               <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <div>
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">1yr Earnings</p>
-                  <p className="text-sm font-semibold text-earn-above">{formatCurrency(selectedRow.earn1yr)}</p>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">7yr Earnings</p>
+                  <p className="text-sm font-semibold text-earn-above">
+                    {selectedRow.earn7yr != null ? formatCurrency(selectedRow.earn7yr) : <span className="text-xs font-normal text-text-secondary">no 7-yr data</span>}
+                  </p>
                 </div>
                 <div>
                   <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">5yr Earnings</p>
                   <p className="text-sm font-semibold text-earn-above">
                     {selectedRow.earn5yr != null ? formatCurrency(selectedRow.earn5yr) : '\u2014'}
                   </p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">1yr Earnings</p>
+                  <p className="text-sm font-semibold text-earn-above">{formatCurrency(selectedRow.earn1yr)}</p>
                 </div>
                 <div>
                   <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">Cost</p>
@@ -573,9 +602,12 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">ROI</p>
-                  <p className="text-sm font-semibold">
-                    {selectedRow.multiple > 0 ? selectedRow.multiple.toFixed(1) + 'x' : '\u2014'}
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-text-secondary">
+                    NPV ({roiHorizon === '7yr' ? '7 yrs' : 'career'})
+                  </p>
+                  <p className={`text-sm font-semibold ${signClass(roiOf(selectedRow).npv)}`}>
+                    {formatNpv(roiOf(selectedRow).npv)}
+                    <span className="ml-1 text-xs font-normal text-text-secondary">{formatRoiX(roiOf(selectedRow).roi)}</span>
                   </p>
                 </div>
               </div>
@@ -620,8 +652,10 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
                 <p className="mt-0.5 text-[10px] text-text-secondary">{r.credTitle} &middot; {r.category}</p>
                 <div className="mt-2 space-y-1 text-xs">
                   <div className="flex justify-between">
-                    <span className="text-text-secondary">1yr Earnings</span>
-                    <span className="font-medium text-earn-above">{formatCurrency(r.earn1yr)}</span>
+                    <span className="text-text-secondary">7yr Earnings</span>
+                    <span className="font-medium text-earn-above">
+                      {r.earn7yr != null ? formatCurrency(r.earn7yr) : <span className="font-normal text-text-secondary">no 7-yr data</span>}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-text-secondary">5yr Earnings</span>
@@ -630,14 +664,28 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
                     </span>
                   </div>
                   <div className="flex justify-between">
+                    <span className="text-text-secondary">1yr Earnings</span>
+                    <span className="font-medium text-earn-above">{formatCurrency(r.earn1yr)}</span>
+                  </div>
+                  <div className="flex justify-between">
                     <span className="text-text-secondary">Cost</span>
                     <span className="font-medium">
                       {r.costAttendance != null && r.costAttendance > 0 ? formatCurrency(r.costAttendance) : '\u2014'}
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-text-secondary">ROI</span>
-                    <span className="font-semibold">{r.multiple > 0 ? r.multiple.toFixed(1) + 'x' : '\u2014'}</span>
+                    <span className="text-text-secondary">NPV ({roiHorizon === '7yr' ? '7 yrs' : 'career'})</span>
+                    <span className={`font-semibold ${signClass(roiOf(r).npv)}`}>{formatNpv(roiOf(r).npv)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">ROI &middot; Payback</span>
+                    <span className="font-medium">
+                      {formatRoiX(roiOf(r).roi)} &middot; {formatPayback(roiOf(r).payback, roiHorizon, roiOf(r).npv != null)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-2" title="Weights by the school's graduation rate; discounted vs S&P 500">
+                    <span className="text-text-secondary">If you might not finish</span>
+                    <span className="font-medium">{formatRoiX(roiOf(r).expectedRoi)}</span>
                   </div>
                 </div>
               </div>
@@ -724,6 +772,15 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
         )}
       </div>
 
+      {/* ROI view */}
+      <RoiControls
+        horizon={roiHorizon}
+        basis={roiBasis}
+        onHorizon={(h) => { setRoiHorizon(h); setPage(1); }}
+        onBasis={(b) => { setRoiBasis(b); setPage(1); }}
+        className="mt-3"
+      />
+
       {/* Count */}
       <p className="mt-2 text-xs text-text-secondary">
         Showing {sorted.length} of {allRows.length} programs
@@ -752,15 +809,21 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
               </th>
               <th
                 className="cursor-pointer px-3 py-2 text-right font-medium text-text-secondary hover:text-text-primary"
-                onClick={() => handleSort('earn1yr')}
+                onClick={() => handleSort('earn7yr')}
               >
-                1yr Earnings{sortArrow('earn1yr')}
+                7yr Earnings{sortArrow('earn7yr')}
               </th>
               <th
                 className="hidden cursor-pointer px-3 py-2 text-right font-medium text-text-secondary hover:text-text-primary sm:table-cell"
                 onClick={() => handleSort('earn5yr')}
               >
                 5yr Earnings{sortArrow('earn5yr')}
+              </th>
+              <th
+                className="hidden cursor-pointer px-3 py-2 text-right font-medium text-text-secondary hover:text-text-primary sm:table-cell"
+                onClick={() => handleSort('earn1yr')}
+              >
+                1yr Earnings{sortArrow('earn1yr')}
               </th>
               <th
                 className="hidden cursor-pointer px-3 py-2 text-right font-medium text-text-secondary hover:text-text-primary md:table-cell"
@@ -770,9 +833,15 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
               </th>
               <th
                 className="cursor-pointer px-3 py-2 text-right font-medium text-text-secondary hover:text-text-primary"
-                onClick={() => handleSort('multiple')}
+                onClick={() => handleSort('npv')}
               >
-                ROI{sortArrow('multiple')}
+                NPV{sortArrow('npv')}
+              </th>
+              <th
+                className="hidden cursor-pointer px-3 py-2 text-right font-medium text-text-secondary hover:text-text-primary sm:table-cell"
+                onClick={() => handleSort('roiX')}
+              >
+                ROI{sortArrow('roiX')}
               </th>
             </tr>
           </thead>
@@ -821,25 +890,38 @@ export default function SchoolDetail({ school, programs, fromTab }: SchoolDetail
                   {r.credTitle}
                 </td>
                 <td className="px-3 py-2 text-right font-medium text-earn-above">
-                  {formatCurrency(r.earn1yr)}
+                  {r.earn7yr != null ? (
+                    formatCurrency(r.earn7yr)
+                  ) : (
+                    <span className="font-normal text-text-secondary" title="No 7-year data (small cohorts are suppressed)">
+                      {'\u2014'}
+                      <span className="ml-1 hidden text-[10px] lg:inline">no 7-yr data</span>
+                    </span>
+                  )}
                 </td>
                 <td className="hidden px-3 py-2 text-right font-medium text-earn-above sm:table-cell">
                   {r.earn5yr != null ? formatCurrency(r.earn5yr) : '\u2014'}
+                </td>
+                <td className="hidden px-3 py-2 text-right font-medium text-earn-above sm:table-cell">
+                  {formatCurrency(r.earn1yr)}
                 </td>
                 <td className="hidden px-3 py-2 text-right text-text-secondary md:table-cell">
                   {r.costAttendance != null && r.costAttendance > 0
                     ? formatCurrency(r.costAttendance)
                     : '\u2014'}
                 </td>
-                <td className="px-3 py-2 text-right font-semibold text-text-primary">
-                  {r.multiple > 0 ? r.multiple.toFixed(1) + 'x' : '\u2014'}
+                <td className={`px-3 py-2 text-right font-semibold ${signClass(roiOf(r).npv)}`}>
+                  {formatNpv(roiOf(r).npv)}
+                </td>
+                <td className="hidden px-3 py-2 text-right text-text-primary sm:table-cell">
+                  {formatRoiX(roiOf(r).roi)}
                 </td>
               </tr>
             ))}
             {paginated.length === 0 && (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={10}
                   className="px-3 py-8 text-center text-sm text-text-secondary"
                 >
                   No programs match your filters

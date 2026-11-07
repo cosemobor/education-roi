@@ -1,5 +1,5 @@
 import { type NextRequest } from 'next/server';
-import { getSchool, schoolsByName } from '@/lib/data/store';
+import { getSchool, getSchoolRanking, schoolsByName } from '@/lib/data/store';
 import { createRateLimiter, getClientIp } from '@/lib/rate-limit';
 
 const checkLimit = createRateLimiter('schools', 60_000, 60);
@@ -24,7 +24,9 @@ export function GET(request: NextRequest) {
     if (!school) {
       return Response.json({ error: 'School not found' }, { status: 404 });
     }
-    return Response.json({ data: school }, { headers: CACHE });
+    // Additive: ranking row (earnings + ROI, real 2024 $) when the school is ranked
+    const ranking = getSchoolRanking(unitId) ?? null;
+    return Response.json({ data: school, ranking }, { headers: CACHE });
   }
 
   // Return all schools (id, name, city, state for search)

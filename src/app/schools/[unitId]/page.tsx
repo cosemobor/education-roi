@@ -1,7 +1,10 @@
 import type { Metadata } from 'next';
-import { getPrograms, getSchool } from '@/lib/data/store';
+import { getPrograms, getSchool, getSchoolRanking } from '@/lib/data/store';
 import type { School, ProgramRecord } from '@/types';
 import SchoolDetail from '@/components/SchoolDetail';
+import SchoolCostHistory from '@/components/history/SchoolCostHistory';
+import SchoolRoiCard from '@/components/SchoolRoiCard';
+import { getSchoolHistory } from '@/lib/data/history';
 import PageNav from '@/components/PageNav';
 
 // Rendered per request (reads ?from=) from bundled in-memory data — no database.
@@ -94,6 +97,8 @@ export default async function SchoolPage({ params, searchParams }: PageProps) {
     earn5yr: r.earn5yr,
     earn1yrCount: r.earn1yrCount,
     earn5yrCount: r.earn5yrCount,
+    earn7yr: r.earn7yr,
+    earn7yrCount: r.earn7yrCount,
     costAttendance: r.costAttendance,
     selectivityTier: r.selectivityTier ?? '',
     ownership: school.ownership,
@@ -103,12 +108,38 @@ export default async function SchoolPage({ params, searchParams }: PageProps) {
     satRead75: school.satRead75,
     size: school.size,
     completionRate: school.completionRate,
+    npv7: r.npv7,
+    roi7: r.roi7,
+    npv7Undiscounted: r.npv7Undiscounted,
+    roi7Undiscounted: r.roi7Undiscounted,
+    paybackYear: r.paybackYear,
+    expectedNpv7: r.expectedNpv7,
+    expectedRoi7: r.expectedRoi7,
+    careerNpv: r.careerNpv,
+    careerRoi: r.careerRoi,
+    careerNpvUndiscounted: r.careerNpvUndiscounted,
+    careerPaybackYear: r.careerPaybackYear,
+    careerExpectedRoi: r.careerExpectedRoi,
+    careerCurve: r.careerCurve,
   }));
+
+  const history = getSchoolHistory(unitId);
+  const ranking = getSchoolRanking(unitId);
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-8 sm:py-12">
       <PageNav />
       <SchoolDetail school={school} programs={programData} fromTab={fromTab} />
+      {ranking && (
+        <SchoolRoiCard
+          schoolName={school.name}
+          state={school.state}
+          netPrice={ranking.netPrice}
+          hsEarnings={ranking.hsEarnings}
+          roi={ranking}
+        />
+      )}
+      {history && <SchoolCostHistory history={history} />}
     </main>
   );
 }
